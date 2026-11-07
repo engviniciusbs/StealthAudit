@@ -10,6 +10,10 @@ namespace StealthAudit\Storage;
 
 /** Collection failures return false without affecting the originating action. */
 final class EventRepository extends Records {
+	public const CATEGORIES = array( 'access', 'users', 'admin', 'content' );
+	public const ACTIONS    = array( 'login', 'login_failed', 'logout', 'created', 'updated', 'deleted', 'role_changed', 'capability_changed', 'activated', 'deactivated', 'installed', 'upgraded', 'theme_switched', 'option_changed', 'trashed', 'restored', 'mfa_password', 'mfa_enrollment', 'mfa_enrolled', 'mfa_access', 'mfa_recovery', 'mfa_replacement', 'mfa_revoked' );
+	public const RESULTS    = array( 'success', 'failure', 'unknown' );
+
 	/**
 	 * Insert an allowlisted record, reserving conservative logical bytes first.
 	 *
@@ -26,9 +30,9 @@ final class EventRepository extends Records {
 			if ( $now < 1 || array_diff( array_keys( $record ), array( 'actor_id', 'category', 'action', 'result', 'origin', 'object_type', 'object_id', 'ip', 'summary' ) ) ) {
 				return false;
 			}
-			$category = self::code( $record['category'] ?? null, array( 'access', 'users', 'admin', 'content' ) );
-			$action   = self::code( $record['action'] ?? null, array( 'login', 'login_failed', 'logout', 'created', 'updated', 'deleted', 'role_changed', 'capability_changed', 'activated', 'deactivated', 'installed', 'upgraded', 'theme_switched', 'option_changed', 'trashed', 'restored', 'mfa_password', 'mfa_enrollment', 'mfa_enrolled', 'mfa_access', 'mfa_recovery', 'mfa_replacement', 'mfa_revoked' ) );
-			$result   = self::code( $record['result'] ?? null, array( 'success', 'failure', 'unknown' ) );
+			$category = self::code( $record['category'] ?? null, self::CATEGORIES );
+			$action   = self::code( $record['action'] ?? null, self::ACTIONS );
+			$result   = self::code( $record['result'] ?? null, self::RESULTS );
 			$origin   = self::code( $record['origin'] ?? null, array( 'http', 'admin', 'rest', 'cron', 'cli', 'unknown' ) );
 			$type     = self::code( $record['object_type'] ?? 'none', array( 'none', 'user', 'plugin', 'theme', 'core', 'option', 'post', 'page', 'attachment' ) );
 			$actor    = isset( $record['actor_id'] ) ? self::identity( $record['actor_id'] ) : null;
@@ -101,5 +105,20 @@ final class EventRepository extends Records {
 	 */
 	public function page( array $filters, int $limit, int $before_id, int $now ): array {
 		return $this->read_page( 'events', $filters, array( 'category', 'actor_id', 'ip', 'action', 'result' ), $limit, $before_id, $now );
+	}
+
+	/**
+	 * Fetch a period-bounded keyset window after authorization by the access layer.
+	 *
+	 * @param array<string,int|string> $filters Fixed equality filters.
+	 * @param int|null                 $from Inclusive UTC lower bound.
+	 * @param int|null                 $to Inclusive UTC upper bound.
+	 * @param array{0:int,1:int}|null  $after Exclusive (time,id) cursor.
+	 * @param int                      $limit Page size 1..100.
+	 * @param int                      $now UTC Unix timestamp.
+	 * @return array{rows:list<array<string,mixed>>,next:array{0:int,1:int}|null} Window.
+	 */
+	public function window( array $filters, ?int $from, ?int $to, ?array $after, int $limit, int $now ): array {
+		return $this->read_window( 'events', $filters, array( 'category', 'actor_id', 'ip', 'action', 'result' ), $from, $to, $after, $limit, $now );
 	}
 }

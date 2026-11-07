@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <ruleset name="StealthAudit">
   <description>WordPress coding and PHP compatibility rules for production PHP.</description>
-  <file>src</file><file>loader</file><file>bootstrap.php</file><file>config</file>
+  <file>src</file><file>templates</file><file>loader</file><file>bootstrap.php</file><file>config</file>
   <arg name="extensions" value="php"/>
   <arg name="basepath" value="."/>
   <config name="testVersion" value="8.3-"/>

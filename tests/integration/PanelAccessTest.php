@@ -326,6 +326,84 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		self::assertTrue( $this->access->authorized() );
 	}
 
+	public function test_recorder_writes_mfa_results_without_credentials(): void {
+		$this->access = new PanelAccess( $this->config, $this->storage->state, $this->cipher, new TotpProvider(), new WordPressSession(), new Context(), fn(): int => $this->now, new StealthAudit\Audit\Recorder( fn() => $this->storage->events, new Context() ) );
+		$this->denied( fn() => $this->access->reconfirm( 'wrong-password-sentinel', $this->nonce ) );
+		$codes = $this->enroll();
+		$this->now += 30;
+		$otp = $this->code();
+		$this->access->authenticate( $otp, $this->nonce );
+		$this->denied( fn() => $this->access->authenticate( $otp, $this->nonce ) );
+		$this->denied( fn() => $this->access->recover( 'synthetic-test-password-only', str_repeat( 'f', 32 ), $this->nonce ) );
+		$this->access->revoke( $this->nonce );
+		$rows = $this->db->rows( 'SELECT * FROM %i ORDER BY id', $this->db->table( 'events' ) );
+		$seen = array_map( static fn( array $row ): string => $row['action'] . ':' . $row['result'], $rows );
+		self::assertSame( array( 'mfa_password:failure', 'mfa_password:success', 'mfa_enrollment:success', 'mfa_enrolled:success', 'mfa_access:success', 'mfa_access:failure', 'mfa_recovery:failure', 'mfa_revoked:success' ), $seen );
+		foreach ( $rows as $row ) {
+			self::assertSame( 'access', $row['category'] );
+			self::assertSame( (string) $this->user, $row['actor_id'] );
+			self::assertSame( '192.0.2.10', $row['ip'] );
+			self::assertSame( '[]', $row['summary'] );
+		}
+		$raw = json_encode( $rows );
+		$session = ( new WordPressSession() )->current( $this->config )['session'];
+		foreach ( array_merge( array( 'synthetic-test-password-only', 'wrong-password-sentinel', $otp, $this->token, $session, $this->nonce, str_repeat( 'f', 32 ) ), $codes ) as $secret ) {
+			self::assertStringNotContainsString( $secret, $raw );
+		}
+	}
+
+	public function test_lost_activity_cas_rereads_proof_once_and_grants_only_if_still_valid(): void {
+		$this->enroll();
+		$session = ( new WordPressSession() )->current( $this->config )['session'];
+		$key = 'proof:' . $session;
+		$this->now += 10;
+		// A concurrent query of the same session touches the proof between read and CAS.
+		self::assertTrue( $this->with_concurrent_write( $key, fn( array $p ): array => array( 'last_activity' => $this->now ) + $p, fn() => $this->access->authorized() ) );
+		self::assertSame( $this->now, $this->storage->state->get( $key, $this->now )['payload']['last_activity'] );
+		$this->now += 10;
+		// A concurrent revocation wins: the re-read sees no valid proof.
+		self::assertFalse( $this->with_concurrent_write( $key, static fn( array $p ): array => array( 'generation' => str_repeat( '0', 64 ), 'authenticated_at' => 0 ) + $p, fn() => $this->access->authorized() ) );
+		self::assertFalse( $this->access->authorized() );
+		$this->now += 30;
+		$this->access->authenticate( $this->code(), $this->nonce );
+		$this->now += 10;
+		// A concurrent factor replacement changes generation: never granted after the conflict.
+		$factor = 'factor:' . $this->user;
+		$swap = function () use ( $factor ): void {
+			$row = $this->storage->state->get( $factor, $this->now );
+			self::assertTrue( $this->storage->state->compare_and_swap( $factor, $row['revision'], array( 'generation' => str_repeat( 'e', 64 ) ) + $row['payload'], null, $this->now ) );
+		};
+		self::assertFalse( $this->with_concurrent_write( $key, fn( array $p ): array => array( 'last_activity' => $this->now ) + $p, fn() => $this->access->authorized(), $swap ) );
+		self::assertFalse( $this->access->authorized() );
+	}
+
+	/**
+	 * Run $operation while a 'query' filter applies one competing CAS just before the
+	 * operation's first proof UPDATE reaches the database.
+	 */
+	private function with_concurrent_write( string $key, Closure $change, Closure $operation, ?Closure $also = null ): bool {
+		$fired = false;
+		$filter = function ( string $query ) use ( &$fired, $key, $change, $also ): string {
+			if ( ! $fired && str_starts_with( $query, 'UPDATE' ) && str_contains( $query, "'" . $key . "'" ) ) {
+				$fired = true;
+				$row = $this->storage->state->get( $key, $this->now );
+				self::assertTrue( $this->storage->state->compare_and_swap( $key, $row['revision'], $change( $row['payload'] ), $this->now + 600, $this->now ) );
+				if ( null !== $also ) {
+					$also();
+				}
+			}
+			return $query;
+		};
+		add_filter( 'query', $filter );
+		try {
+			$result = $operation();
+		} finally {
+			remove_filter( 'query', $filter );
+		}
+		self::assertTrue( $fired );
+		return $result;
+	}
+
 	private function workers( string $mode, string $code ): array {
 		global $wpdb;
 		$children = array();

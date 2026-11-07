@@ -399,7 +399,9 @@ final class PanelAccess {
 	}
 
 	/**
-	 * Validate and optionally CAS-touch an active proof; conflict denies this query.
+	 * Validate and optionally CAS-touch an active proof.
+	 *
+	 * A lost activity CAS re-reads factor and proof exactly once; any other failure denies.
 	 *
 	 * @param array{user:int,session:string} $identity Identity.
 	 * @param array<string,mixed>            $factor Current factor.
@@ -408,18 +410,33 @@ final class PanelAccess {
 	 */
 	private function proof_valid( array $identity, array $factor, int $now, bool $activity ): bool {
 		$row = $this->proof( $identity, $now );
-		if ( null === $row ) {
+		if ( null === $row || ! self::proof_fresh( $factor, $row['payload'], $now ) ) {
 			return false;
 		}
 		$p = $row['payload'];
-		if ( ! hash_equals( $factor['generation'], $p['generation'] ) || $p['authenticated_at'] <= 0 || $p['authenticated_at'] + 28800 <= $now || $p['last_activity'] + 1800 <= $now ) {
-			return false;
-		}
 		if ( ! $activity || $p['last_activity'] === $now ) {
 			return true;
 		}
 		$p['last_activity'] = $now;
-		return $this->state->compare_and_swap( 'proof:' . $identity['session'], $row['revision'], $p, min( $now + 1800, $p['authenticated_at'] + 28800 ), $now );
+		if ( $this->state->compare_and_swap( 'proof:' . $identity['session'], $row['revision'], $p, min( $now + 1800, $p['authenticated_at'] + 28800 ), $now ) ) {
+			return true;
+		}
+		// A concurrent query of this session may have touched the proof first. Grant only
+		// if a fresh read still shows the same session proof for the current generation.
+		$current = $this->factor( $identity['user'], $now );
+		$again   = $this->proof( $identity, $now );
+		return null !== $current && $current['payload']['active'] && null !== $again && self::proof_fresh( $current['payload'], $again['payload'], $now );
+	}
+
+	/**
+	 * Generation, authentication, absolute and idle limits for a proof payload.
+	 *
+	 * @param array<string,mixed> $factor Factor payload.
+	 * @param array<string,mixed> $proof Validated proof payload.
+	 * @param int                 $now Clock.
+	 */
+	private static function proof_fresh( array $factor, array $proof, int $now ): bool {
+		return hash_equals( $factor['generation'], $proof['generation'] ) && $proof['authenticated_at'] > 0 && $proof['authenticated_at'] + 28800 > $now && $proof['last_activity'] + 1800 > $now;
 	}
 
 	/**

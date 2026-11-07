@@ -94,7 +94,7 @@ final class StateRepository {
 	public function replace_expired( string $key, array $payload, int $expires, int $now ): bool {
 		self::validate_key( $key );
 		$this->validate_expiry( $key, $expires );
-		if ( ! preg_match( '/^(proof|limit):/', $key ) || $expires <= $now ) {
+		if ( ! preg_match( '/^(proof|limit|lease):/', $key ) || $expires <= $now ) {
 			throw new StorageException( 'Invalid expired replacement.' );
 		}
 		return 1 === $this->db->execute( 'UPDATE %i SET payload=%s,revision=%d,expires_at=%s WHERE state_key=%s AND expires_at IS NOT NULL AND expires_at<=%s', $this->db->table( 'state' ), self::encode( $payload ), random_int( 1, PHP_INT_MAX >> 1 ), gmdate( 'Y-m-d H:i:s', $expires ), $key, gmdate( 'Y-m-d H:i:s', $now ) );

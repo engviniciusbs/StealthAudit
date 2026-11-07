@@ -21,6 +21,11 @@ use StealthAudit\Audit\Recorder;
 use StealthAudit\Audit\Upgrades;
 use StealthAudit\Diagnostics\Collector;
 use StealthAudit\Diagnostics\Normalizer;
+use StealthAudit\Http\Api;
+use StealthAudit\Http\Guard;
+use StealthAudit\Http\Panel;
+use StealthAudit\Http\Router;
+use StealthAudit\Http\Urls;
 use StealthAudit\Security\PanelAccess;
 use StealthAudit\Security\SecretCipher;
 use StealthAudit\Security\TotpProvider;
@@ -52,6 +57,12 @@ final class Runtime {
 	 * @var Collector|null
 	 */
 	private ?Collector $diagnostics = null;
+	/**
+	 * Prevent duplicate route registration.
+	 *
+	 * @var bool
+	 */
+	private bool $http_initialized = false;
 
 	/**
 	 * Keep the boot result without exposing exception details.
@@ -66,7 +77,7 @@ final class Runtime {
 		public readonly bool $configuration_valid,
 	) {}
 
-	/** Boot once; collection starts after plugins load, without access routes. */
+	/** Boot once; collection starts after plugins load, then the panel routes. */
 	public static function boot(): self {
 		if ( isset( self::$instance ) ) {
 			return self::$instance;
@@ -82,6 +93,7 @@ final class Runtime {
 		add_action( 'muplugins_loaded', array( self::$instance, 'initialize_diagnostics' ), -1000 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_storage' ), 5 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_audit' ), 10 );
+		add_action( 'plugins_loaded', array( self::$instance, 'initialize_http' ), 20 );
 		return self::$instance;
 	}
 
@@ -130,6 +142,24 @@ final class Runtime {
 		$recorder                = new Recorder( fn () => $this->storage()->events, new Context( $this->configuration->trusted_proxies ) );
 		( new Collectors( $recorder ) )->register();
 		( new Upgrades( $recorder ) )->register();
+	}
+
+	/**
+	 * Register the panel route and REST API; every response denies without the full policy.
+	 *
+	 * The route exists even when the panel is unconfigured, as a blocked page/API (503).
+	 */
+	public function initialize_http(): void {
+		if ( $this->http_initialized ) {
+			return;
+		}
+		$this->http_initialized = true;
+		$urls                   = new Urls( $this->configuration->endpoint );
+		$access                 = fn (): PanelAccess => $this->panel_access();
+		$clock                  = static fn (): int => time();
+		$panel                  = new Panel( $this->configuration, $urls, $access, dirname( __DIR__, 2 ) . '/templates/panel.php' );
+		( new Router( $urls, $panel, fn () => $this->storage()->state, $clock ) )->register();
+		( new Api( new Guard( $this->configuration, $access, $urls ), fn (): Storage => $this->storage(), fn (): array => $this->diagnostic_health(), $this->configuration, $clock ) )->register();
 	}
 
 	/** Initialize schema once at the WordPress lifecycle boundary, never per event. */

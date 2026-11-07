@@ -10,6 +10,8 @@ namespace StealthAudit\Storage;
 
 /** Accepts reduced messages only; never accept raw request/error objects. */
 final class ErrorRepository extends Records {
+	public const SEVERITIES = array( 'fatal', 'warning', 'notice', 'deprecated', 'error' );
+
 	/**
 	 * Coarse result without database exception details.
 	 *
@@ -39,7 +41,7 @@ final class ErrorRepository extends Records {
 			if ( $now < 1 || array_diff( array_keys( $record ), array( 'severity', 'message', 'file', 'line' ) ) ) {
 				return false;
 			}
-			$severity = self::code( $record['severity'] ?? null, array( 'fatal', 'warning', 'notice', 'deprecated', 'error' ) );
+			$severity = self::code( $record['severity'] ?? null, self::SEVERITIES );
 			$message  = $record['message'] ?? null;
 			$file     = $record['file'] ?? '';
 			$line     = $record['line'] ?? 0;
@@ -93,5 +95,20 @@ final class ErrorRepository extends Records {
 	 */
 	public function page( array $filters, int $limit, int $before_id, int $now ): array {
 		return $this->read_page( 'errors', $filters, array( 'severity', 'fingerprint' ), $limit, $before_id, $now );
+	}
+
+	/**
+	 * Fetch a period-bounded keyset window by first occurrence after authorization.
+	 *
+	 * @param array<string,int|string> $filters Fixed equality filters.
+	 * @param int|null                 $from Inclusive UTC lower bound.
+	 * @param int|null                 $to Inclusive UTC upper bound.
+	 * @param array{0:int,1:int}|null  $after Exclusive (time,id) cursor.
+	 * @param int                      $limit Page size 1..100.
+	 * @param int                      $now UTC Unix timestamp.
+	 * @return array{rows:list<array<string,mixed>>,next:array{0:int,1:int}|null} Window.
+	 */
+	public function window( array $filters, ?int $from, ?int $to, ?array $after, int $limit, int $now ): array {
+		return $this->read_window( 'errors', $filters, array( 'severity' ), $from, $to, $after, $limit, $now );
 	}
 }
