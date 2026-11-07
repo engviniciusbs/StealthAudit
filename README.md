@@ -2,7 +2,9 @@
 
 Open-source WordPress audit logs and PHP diagnostics for DevOps-managed sites, designed as a must-use plugin.
 
-**Status: development.** The design and implementation plan are documented. There is no installable plugin or production-ready release yet. Compatibility, performance and security controls must be demonstrated by implementation tests before release.
+**Status: development.** The must-use loader, validated operator configuration and reproducible development/test environment are implemented. Audit collectors, storage, panel authentication and the frontend are still pending. There is no production-ready release yet.
+
+The initial foundation passes 21 unit tests (33 assertions), 2 WordPress integration tests (8 assertions), PHP lint, WordPress Coding Standards and PHPStan. See [local setup](docs/testing/local-setup.md) and [phase 1 verification](docs/testing/phase-1-verification.md) for commands, environment and remaining limitations. These results validate the foundation, not the complete planned plugin.
 
 ## Planned behavior
 
@@ -29,8 +31,8 @@ Collection failures must preserve normal site operation where possible; access v
 - [Implementation plan](docs/plans/2026-11-07-implementation-plan.md)
 - [Documentation and verified API catalog](docs/plans/2026-11-07-documentation-discovery.md)
 
-The detailed planning documents are currently in Portuguese. Development and installation instructions will be added as the corresponding functionality is implemented and verified. No secrets, local operator configuration or GeoIP database should be committed.
+The detailed planning documents and local setup are currently in Portuguese. Production installation instructions will be added as the corresponding functionality is implemented and verified. No secrets, local operator configuration or GeoIP database should be committed.
 
-## License status
+## License
 
-The project is intended for open-source distribution. The implementation plan proposes a GPL-compatible license, with `GPL-3.0-or-later` as its candidate. The final license and third-party notices will be established after the runtime dependency inventory; there is no packaged release under that candidate license yet.
+Project code is licensed under [GPL-3.0-or-later](LICENSE). Bundled dependencies retain their own licenses; see [third-party notices](THIRD-PARTY-NOTICES.md). GeoIP database licensing is separate, and no database is included.

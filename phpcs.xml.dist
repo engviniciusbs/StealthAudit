@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<ruleset name="StealthAudit">
+  <description>WordPress coding and PHP compatibility rules for production PHP.</description>
+  <file>src</file><file>loader</file><file>bootstrap.php</file><file>config</file>
+  <arg name="extensions" value="php"/>
+  <arg name="basepath" value="."/>
+  <config name="testVersion" value="8.3-"/>
+  <rule ref="WordPress"/>
+  <rule ref="PHPCompatibilityWP"/>
+  <!-- PSR-4 classes deliberately use PSR filenames instead of WP class-*.php. -->
+  <rule ref="WordPress.Files.FileName"><exclude-pattern>src/*</exclude-pattern><exclude-pattern>config/stealthaudit.example.php</exclude-pattern></rule>
+  <!-- WPCS cannot map PHPStan list&lt;T&gt; annotations to native array types. -->
+  <rule ref="Squiz.Commenting.FunctionComment.IncorrectTypeHint"><exclude-pattern>src/*</exclude-pattern></rule>
+  <!-- Pure value objects need no WordPress calls; strict typing guards arguments. -->
+  <rule ref="WordPress.PHP.YodaConditions.NotYoda"><exclude-pattern>src/*</exclude-pattern></rule>
+</ruleset>

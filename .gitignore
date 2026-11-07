@@ -8,6 +8,7 @@
 /.phpunit.cache/
 /.phpunit.result.cache
 /.phpcs-cache
+/.phpstan-cache/
 
 # Local environment, credentials and operator configuration
 .env

@@ -1,0 +1,17 @@
+{
+  "name": "stealthaudit",
+  "version": "0.1.0-dev",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "env:start": "node tools/wp-env.cjs --development start",
+    "env:stop": "node tools/wp-env.cjs --development stop",
+    "env:test:start": "node tools/wp-env.cjs start",
+    "env:test:stop": "node tools/wp-env.cjs stop",
+    "test:unit": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer test:unit",
+    "test:integration": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer test:integration",
+    "quality": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer quality"
+  },
+  "devDependencies": { "@wordpress/env": "12.1.0" }
+}

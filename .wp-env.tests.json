@@ -1,0 +1,12 @@
+{
+  "core": "https://wordpress.org/wordpress-7.1.4.zip",
+  "phpVersion": "8.3",
+  "mariadbVersion": "10.11",
+  "port": 8880,
+  "testsEnvironment": false,
+  "mappings": {
+    "wp-content/mu-plugins/stealthaudit": ".",
+    "wp-content/mu-plugins/stealthaudit.php": "./loader/stealthaudit.php"
+  },
+  "config": { "WP_DEBUG": true, "WP_DEBUG_DISPLAY": false, "WP_ENVIRONMENT_TYPE": "local" }
+}

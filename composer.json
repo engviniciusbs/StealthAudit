@@ -1,0 +1,35 @@
+{
+  "name": "stealthaudit/stealthaudit",
+  "description": "Operator-managed WordPress MU audit and diagnostics panel",
+  "type": "wordpress-muplugin",
+  "license": "GPL-3.0-or-later",
+  "require": {
+    "php": ">=8.3",
+    "ext-json": "*",
+    "spomky-labs/otphp": "~11.5.0",
+    "bacon/bacon-qr-code": "~3.1.1",
+    "geoip2/geoip2": "~3.4.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6",
+    "yoast/phpunit-polyfills": "^4.0",
+    "wp-coding-standards/wpcs": "^3.3",
+    "phpcompatibility/phpcompatibility-wp": "^2.1",
+    "phpstan/phpstan": "^2.1",
+    "szepeviktor/phpstan-wordpress": "^2.0",
+    "dealerdirect/phpcodesniffer-composer-installer": "^1.1"
+  },
+  "autoload": { "psr-4": { "StealthAudit\\": "src/" } },
+  "autoload-dev": { "psr-4": { "StealthAudit\\Tests\\": "tests/" } },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": { "dealerdirect/phpcodesniffer-composer-installer": true },
+    "platform": { "php": "8.3.0" }
+  },
+  "scripts": {
+    "test:unit": "phpunit -c phpunit.xml.dist",
+    "test:integration": "phpunit -c phpunit.integration.xml.dist",
+    "lint": "php tools/lint.php",
+    "quality": ["@lint", "phpcs", "phpstan analyse --no-progress"]
+  }
+}
