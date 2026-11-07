@@ -1,5 +1,7 @@
 # Ambiente local e verificações da fase 1
 
+Este documento registra a base da fase 1. O armazenamento foi acrescentado depois; ver [verificação da fase 2](phase-2-storage.md) para tabelas, migração e limites atuais.
+
 Verificado em 2026-11-07. Código em desenvolvimento: esta fase não contém coletores, tabelas, rotas de acesso ou painel. `panel_configured()` informa pré-requisitos, nunca autentica ou autoriza uma consulta.
 
 ## Preparação

@@ -13,6 +13,8 @@ namespace StealthAudit\Bootstrap;
 use StealthAudit\Config\Configuration;
 use StealthAudit\Config\ConfigurationLoader;
 use Throwable;
+use StealthAudit\Storage\Storage;
+use StealthAudit\Storage\StorageException;
 
 /** Idempotent runtime state; capabilities do not grant authentication. */
 final class Runtime {
@@ -22,6 +24,12 @@ final class Runtime {
 	 * @var self|null
 	 */
 	private static ?self $instance = null;
+	/**
+	 * Request-scoped storage, initialized after plugins load.
+	 *
+	 * @var Storage|null
+	 */
+	private ?Storage $storage = null;
 
 	/**
 	 * Keep the boot result without exposing exception details.
@@ -49,7 +57,30 @@ final class Runtime {
 			$valid         = false;
 		}
 		self::$instance = new self( Requirements::detect(), $configuration, $valid );
+		add_action( 'plugins_loaded', array( self::$instance, 'initialize_storage' ), 5 );
 		return self::$instance;
+	}
+
+	/** Initialize schema once at the WordPress lifecycle boundary, never per event. */
+	public function initialize_storage(): void {
+		global $wpdb;
+		if ( null !== $this->storage || ! $this->collection_available() || ! $wpdb instanceof \wpdb ) {
+			return;
+		}
+		$this->storage        = new Storage( $wpdb, $this->configuration );
+		$this->storage->ready = $this->storage->schema->ensure();
+	}
+
+	/**
+	 * Return ready storage; security callers must deny on any failure.
+	 *
+	 * @throws StorageException When migration or database prerequisites failed.
+	 */
+	public function storage(): Storage {
+		if ( null === $this->storage || ! $this->storage->ready ) {
+			throw new StorageException( 'Storage unavailable.' );
+		}
+		return $this->storage;
 	}
 
 	/** Whether collection prerequisites exist (collectors are added later). */

@@ -23,6 +23,8 @@ final readonly class Configuration {
 		'errors_per_request' => 5,
 		'events_per_second'  => 60,
 		'errors_per_second'  => 20,
+		'state_rows'         => 10000,
+		'storage_work_ms'    => 100,
 	);
 
 	/**

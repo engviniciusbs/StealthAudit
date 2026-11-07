@@ -30,6 +30,6 @@
     "test:unit": "phpunit -c phpunit.xml.dist",
     "test:integration": "phpunit -c phpunit.integration.xml.dist",
     "lint": "php tools/lint.php",
-    "quality": ["@lint", "phpcs", "phpstan analyse --no-progress"]
+    "quality": ["@lint", "phpcs", "phpstan analyse --no-progress --memory-limit=512M"]
   }
 }
