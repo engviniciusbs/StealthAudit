@@ -37,6 +37,7 @@ final readonly class Configuration {
 	 * @param list<string>      $trusted_proxies Canonical IPs or CIDRs.
 	 * @param array<string,int> $limits Resource budgets.
 	 * @param string|null       $mmdb_path Optional local database path.
+	 * @param string            $installation_id Stable operator-owned cipher context.
 	 */
 	private function __construct(
 		public array $authorized_user_ids,
@@ -46,6 +47,7 @@ final readonly class Configuration {
 		public array $trusted_proxies,
 		public array $limits,
 		public ?string $mmdb_path,
+		public string $installation_id,
 	) {}
 
 	/**
@@ -99,7 +101,11 @@ final readonly class Configuration {
 		if ( null !== $mmdb && ( ! is_string( $mmdb ) || ! str_starts_with( $mmdb, '/' ) || str_contains( $mmdb, "\0" ) ) ) {
 			throw new InvalidArgumentException( 'Invalid MMDB path.' );
 		}
-		return new self( array_values( array_unique( $ids ) ), $endpoint, $key, $key_id, $proxies, array_replace( self::DEFAULT_LIMITS, $overrides ), $mmdb );
+		$installation = $values['installation_id'] ?? '';
+		if ( ! is_string( $installation ) || ! preg_match( '/^[a-zA-Z0-9_-]{0,128}$/D', $installation ) ) {
+			throw new InvalidArgumentException( 'Invalid installation identity.' );
+		}
+		return new self( array_values( array_unique( $ids ) ), $endpoint, $key, $key_id, $proxies, array_replace( self::DEFAULT_LIMITS, $overrides ), $mmdb, $installation );
 	}
 
 	/**

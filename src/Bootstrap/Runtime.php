@@ -21,6 +21,10 @@ use StealthAudit\Audit\Recorder;
 use StealthAudit\Audit\Upgrades;
 use StealthAudit\Diagnostics\Collector;
 use StealthAudit\Diagnostics\Normalizer;
+use StealthAudit\Security\PanelAccess;
+use StealthAudit\Security\SecretCipher;
+use StealthAudit\Security\TotpProvider;
+use StealthAudit\Security\WordPressSession;
 
 /** Idempotent runtime state; capabilities do not grant authentication. */
 final class Runtime {
@@ -158,6 +162,21 @@ final class Runtime {
 
 	/** Whether security prerequisites exist; never an access authorization. */
 	public function panel_configured(): bool {
-		return $this->configuration_valid && array() === $this->requirements->panel_missing() && $this->configuration->has_key() && array() !== $this->configuration->authorized_user_ids;
+		return $this->configuration_valid && array() === $this->requirements->panel_missing() && $this->configuration->has_key() && '' !== $this->configuration->installation_id && array() !== $this->configuration->authorized_user_ids;
+	}
+
+	/**
+	 * Compose panel-only authorization after WordPress pluggables and storage exist.
+	 *
+	 * @throws \RuntimeException When prerequisites are absent; callers must deny.
+	 */
+	public function panel_access(): PanelAccess {
+		$key = $this->configuration->encryption_key();
+		if ( ! $this->panel_configured() || null === $key ) {
+			throw new \RuntimeException( 'Panel unavailable.' );
+		}
+		$storage = $this->storage();
+		$context = new Context( $this->configuration->trusted_proxies );
+		return new PanelAccess( $this->configuration, $storage->state, new SecretCipher( $key, $this->configuration->key_id, $this->configuration->installation_id ), new TotpProvider(), new WordPressSession(), $context, static fn (): int => time(), new Recorder( fn () => $this->storage()->events, $context ) );
 	}
 }

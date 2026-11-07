@@ -83,6 +83,24 @@ final class StateRepository {
 	}
 
 	/**
+	 * Reclaim an expired physical row in one conditional write, without a delete gap.
+	 *
+	 * @param string              $key Ephemeral identity.
+	 * @param array<string,mixed> $payload Replacement payload.
+	 * @param int                 $expires Future expiry.
+	 * @param int                 $now Logical current time.
+	 * @throws StorageException On invalid state or SQL failure.
+	 */
+	public function replace_expired( string $key, array $payload, int $expires, int $now ): bool {
+		self::validate_key( $key );
+		$this->validate_expiry( $key, $expires );
+		if ( ! preg_match( '/^(proof|limit):/', $key ) || $expires <= $now ) {
+			throw new StorageException( 'Invalid expired replacement.' );
+		}
+		return 1 === $this->db->execute( 'UPDATE %i SET payload=%s,revision=%d,expires_at=%s WHERE state_key=%s AND expires_at IS NOT NULL AND expires_at<=%s', $this->db->table( 'state' ), self::encode( $payload ), random_int( 1, PHP_INT_MAX >> 1 ), gmdate( 'Y-m-d H:i:s', $expires ), $key, gmdate( 'Y-m-d H:i:s', $now ) );
+	}
+
+	/**
 	 * Atomically replace exactly one current revision; no security retry here.
 	 *
 	 * Factor ciphertext, recovery hashes and generation belong in this same payload.

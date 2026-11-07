@@ -12,6 +12,7 @@ return array(
 	'endpoint'            => '/stealthaudit',
 	'key_base64'          => '', // Operator supplies a random 32-byte key, base64 encoded.
 	'key_id'              => '', // Nonsecret identifier for the supplied key.
+	'installation_id'     => '', // Stable unique installation ID; preserve across URL/key changes.
 	'trusted_proxies'     => array(), // Exact IP or CIDR; empty ignores forwarding headers.
 	'limits'              => array(), // See Configuration::DEFAULT_LIMITS.
 	'mmdb_path'           => null, // Optional local absolute path; no download performed.

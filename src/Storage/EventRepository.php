@@ -27,7 +27,7 @@ final class EventRepository extends Records {
 				return false;
 			}
 			$category = self::code( $record['category'] ?? null, array( 'access', 'users', 'admin', 'content' ) );
-			$action   = self::code( $record['action'] ?? null, array( 'login', 'login_failed', 'logout', 'created', 'updated', 'deleted', 'role_changed', 'capability_changed', 'activated', 'deactivated', 'installed', 'upgraded', 'theme_switched', 'option_changed', 'trashed', 'restored' ) );
+			$action   = self::code( $record['action'] ?? null, array( 'login', 'login_failed', 'logout', 'created', 'updated', 'deleted', 'role_changed', 'capability_changed', 'activated', 'deactivated', 'installed', 'upgraded', 'theme_switched', 'option_changed', 'trashed', 'restored', 'mfa_password', 'mfa_enrollment', 'mfa_enrolled', 'mfa_access', 'mfa_recovery', 'mfa_replacement', 'mfa_revoked' ) );
 			$result   = self::code( $record['result'] ?? null, array( 'success', 'failure', 'unknown' ) );
 			$origin   = self::code( $record['origin'] ?? null, array( 'http', 'admin', 'rest', 'cron', 'cli', 'unknown' ) );
 			$type     = self::code( $record['object_type'] ?? 'none', array( 'none', 'user', 'plugin', 'theme', 'core', 'option', 'post', 'page', 'attachment' ) );
