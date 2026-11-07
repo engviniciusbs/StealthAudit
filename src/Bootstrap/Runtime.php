@@ -1,6 +1,6 @@
 <?php
 /**
- * Phase-one capability state. No routes or collectors are enabled yet.
+ * Capability state, storage lifecycle and request-scoped collection.
  *
  * @license GPL-3.0-or-later
  * @package StealthAudit
@@ -15,6 +15,10 @@ use StealthAudit\Config\ConfigurationLoader;
 use Throwable;
 use StealthAudit\Storage\Storage;
 use StealthAudit\Storage\StorageException;
+use StealthAudit\Audit\Collectors;
+use StealthAudit\Audit\Context;
+use StealthAudit\Audit\Recorder;
+use StealthAudit\Audit\Upgrades;
 
 /** Idempotent runtime state; capabilities do not grant authentication. */
 final class Runtime {
@@ -30,6 +34,12 @@ final class Runtime {
 	 * @var Storage|null
 	 */
 	private ?Storage $storage = null;
+	/**
+	 * Prevent duplicate hook registration if lifecycle initialization is repeated.
+	 *
+	 * @var bool
+	 */
+	private bool $audit_initialized = false;
 
 	/**
 	 * Keep the boot result without exposing exception details.
@@ -44,7 +54,7 @@ final class Runtime {
 		public readonly bool $configuration_valid,
 	) {}
 
-	/** Boot once without registering collectors or access routes. */
+	/** Boot once; collection starts after plugins load, without access routes. */
 	public static function boot(): self {
 		if ( isset( self::$instance ) ) {
 			return self::$instance;
@@ -58,7 +68,19 @@ final class Runtime {
 		}
 		self::$instance = new self( Requirements::detect(), $configuration, $valid );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_storage' ), 5 );
+		add_action( 'plugins_loaded', array( self::$instance, 'initialize_audit' ), 10 );
 		return self::$instance;
+	}
+
+	/** Register collection independently of panel credentials; pluggables are now loaded. */
+	public function initialize_audit(): void {
+		if ( $this->audit_initialized || ! $this->collection_available() ) {
+			return;
+		}
+		$this->audit_initialized = true;
+		$recorder                = new Recorder( fn () => $this->storage()->events, new Context( $this->configuration->trusted_proxies ) );
+		( new Collectors( $recorder ) )->register();
+		( new Upgrades( $recorder ) )->register();
 	}
 
 	/** Initialize schema once at the WordPress lifecycle boundary, never per event. */
@@ -83,7 +105,7 @@ final class Runtime {
 		return $this->storage;
 	}
 
-	/** Whether collection prerequisites exist (collectors are added later). */
+	/** Whether independent collection prerequisites exist. */
 	public function collection_available(): bool {
 		return array() === $this->requirements->collection_missing();
 	}

@@ -41,11 +41,20 @@ final class EventRepository extends Records {
 				$ip = inet_ntop( inet_pton( $ip ) );
 			}
 			$summary = $record['summary'] ?? array();
-			if ( ! is_array( $summary ) || array_diff( array_keys( $summary ), array( 'count', 'reason' ) ) ) {
+			if ( ! is_array( $summary ) || array_diff( array_keys( $summary ), array( 'count', 'reason', 'reference', 'stage' ) ) ) {
 				return false;
 			}
 			if ( isset( $summary['count'] ) ) {
 				self::identity( $summary['count'] );
+			}
+			if ( array_key_exists( 'reference', $summary ) && ! \StealthAudit\Audit\Reference::valid( $type, $summary['reference'] ) ) {
+				return false;
+			}
+			if ( array_key_exists( 'stage', $summary ) ) {
+				if ( 'admin' !== $category || ! in_array( $action, array( 'installed', 'upgraded' ), true ) ) {
+					return false;
+				}
+				self::code( $summary['stage'], array( 'download', 'package', 'completion', 'automatic' ) );
 			}
 			if ( isset( $summary['reason'] ) ) {
 				self::code( $summary['reason'], array( 'invalid_username', 'incorrect_password', 'empty_username', 'empty_password', 'authentication_failed', 'not_confirmed' ) );

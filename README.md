@@ -2,9 +2,9 @@
 
 Open-source WordPress audit logs and PHP diagnostics for DevOps-managed sites, designed as a must-use plugin.
 
-**Status: development.** The must-use loader, operator configuration, bounded InnoDB storage and reproducible development/test environment are implemented. Audit collectors, panel authentication and the frontend are still pending. There is no production-ready release yet.
+**Status: development.** The must-use loader, operator configuration, bounded InnoDB storage, audit collectors and reproducible development/test environment are implemented. PHP diagnostics, panel authentication and the frontend are still pending. There is no production-ready release yet.
 
-The current foundation and storage pass 21 unit tests (33 assertions) and 16 WordPress integration tests (127 assertions), including separate-process CAS and capacity contention. See [local setup](docs/testing/local-setup.md), [phase 1 verification](docs/testing/phase-1-verification.md) and [phase 2 storage verification](docs/testing/phase-2-storage.md) for commands, quality checks and remaining limitations. These results validate the implemented phases, not the complete planned plugin.
+See [local setup](docs/testing/local-setup.md), [phase 1 verification](docs/testing/phase-1-verification.md), [phase 2 storage verification](docs/testing/phase-2-storage.md) and [phase 3 audit coverage](docs/testing/phase-3-audit.md) for test results, commands and remaining limitations. Updater completion alone never proves a successful bulk or core update; unresolved observations remain unknown. These results validate the implemented phases, not the complete planned plugin.
 
 ## Planned behavior
 

@@ -1,6 +1,6 @@
 # Contrato de cobertura de eventos
 
-Fase 0, 2026-11-07. Fontes fixadas em WordPress **7.1.4**. A tabela descreve o que será instrumentado, não afirma que o coletor já foi implementado ou testado. Ler a [compatibilidade](compatibility.md) e o [design](../specs/2026-11-07-stealthaudit-design.md).
+Contrato atualizado na fase 3, 2026-11-07. Fontes fixadas em WordPress **7.1.4**. Os coletores de ações estão implementados; semântica observada, testes e lacunas estão em [fase 3](phase-3-audit.md). Diagnóstico PHP permanece pendente da fase 4. Ler a [compatibilidade](compatibility.md) e o [design](../specs/2026-11-07-stealthaudit-design.md).
 
 ## Envelope e dados permitidos
 
@@ -32,7 +32,7 @@ accepted_args é o número máximo passado ao adaptador; o adaptador seleciona o
 | Conteúdo | wp_after_insert_post(post_id, post, update, post_before), 4 | ID, post_type permitido e criação/edição; descartar texto e before. | Remover autosave/revisões, deduplicar anexos; APIs podem suprimir after-hooks. |
 | Conteúdo | transition_post_status(new_status, old_status, post), 3 | ID/tipo e mudança de estado, somente se mudou. | Diferenciar lixeira/restauração de exclusão física; não duplicar update geral. |
 | Conteúdo | deleted_post(post_id, post), 2 | ID/tipo; exclusão física confirmada. | Pode cobrir anexos; preservar uma confirmação por objeto/operação. |
-| Mídia | add_attachment(post_id), 1; edit_attachment(post_id), 1 | ID de attachment e ação. | Não gravar binário/URL privada/conteúdo; deduplicar com hook de post. |
+| Mídia | add_attachment(post_id), 1; attachment_updated(post_id, post_after, post_before), 3 | ID de attachment e ação; somente estados dos objetos temporários para distinguir lixeira/restauração. | No core fixado anexos retornam antes de transition_post_status/wp_after_insert_post. Não ouvir edit_attachment em paralelo; não persistir snapshots. |
 | Mídia | delete_attachment(post_id, post), 2 | No máximo tentativa/início. | Pré-exclusão; aguardar deleted_post para sucesso. |
 
 Lista inicial de options: home, siteurl, users_can_register, default_role, blog_public, show_on_front, page_on_front, page_for_posts, permalink_structure, default_comment_status e default_ping_status. É uma lista explícita a testar, não um coletor universal. Evitar snapshots, mesmo quando o valor parece inofensivo.
