@@ -19,6 +19,8 @@ use StealthAudit\Audit\Collectors;
 use StealthAudit\Audit\Context;
 use StealthAudit\Audit\Recorder;
 use StealthAudit\Audit\Upgrades;
+use StealthAudit\Diagnostics\Collector;
+use StealthAudit\Diagnostics\Normalizer;
 
 /** Idempotent runtime state; capabilities do not grant authentication. */
 final class Runtime {
@@ -40,6 +42,12 @@ final class Runtime {
 	 * @var bool
 	 */
 	private bool $audit_initialized = false;
+	/**
+	 * Request diagnostics registered after loader restoration.
+	 *
+	 * @var Collector|null
+	 */
+	private ?Collector $diagnostics = null;
 
 	/**
 	 * Keep the boot result without exposing exception details.
@@ -67,9 +75,46 @@ final class Runtime {
 			$valid         = false;
 		}
 		self::$instance = new self( Requirements::detect(), $configuration, $valid );
+		add_action( 'muplugins_loaded', array( self::$instance, 'initialize_diagnostics' ), -1000 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_storage' ), 5 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_audit' ), 10 );
 		return self::$instance;
+	}
+
+	/** Register before conventional plugins; early writes require an already installed schema. */
+	public function initialize_diagnostics(): void {
+		global $wpdb;
+		if ( null !== $this->diagnostics || ! $this->collection_available() ) {
+			return;
+		}
+		$this->diagnostics = new Collector( new Normalizer( ABSPATH ), fn () => $this->storage()->errors, $this->configuration->limits['errors_per_request'] );
+		$this->diagnostics->register();
+		if ( $wpdb instanceof \wpdb ) {
+			try {
+				$this->storage = new Storage( $wpdb, $this->configuration );
+				// Never migrate from the error handler or a fatal shutdown callback.
+				$this->storage->ready = $this->storage->schema->current();
+				if ( $this->storage->ready ) {
+					$this->diagnostics->flush();
+				}
+			} catch ( Throwable $failure ) {
+				// The normal lifecycle gets one initialization attempt; no public fallback.
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Coarse request-scoped status; access control is required before exposing it.
+	 *
+	 * @return array{status:string,dropped:int,buffered:int} Diagnostic health.
+	 */
+	public function diagnostic_health(): array {
+		return null === $this->diagnostics ? array(
+			'status'   => 'disabled',
+			'dropped'  => 0,
+			'buffered' => 0,
+		) : $this->diagnostics->health();
 	}
 
 	/** Register collection independently of panel credentials; pluggables are now loaded. */
@@ -86,11 +131,12 @@ final class Runtime {
 	/** Initialize schema once at the WordPress lifecycle boundary, never per event. */
 	public function initialize_storage(): void {
 		global $wpdb;
-		if ( null !== $this->storage || ! $this->collection_available() || ! $wpdb instanceof \wpdb ) {
+		if ( ( null !== $this->storage && $this->storage->ready ) || ! $this->collection_available() || ! $wpdb instanceof \wpdb ) {
 			return;
 		}
-		$this->storage        = new Storage( $wpdb, $this->configuration );
+		$this->storage      ??= new Storage( $wpdb, $this->configuration );
 		$this->storage->ready = $this->storage->schema->ensure();
+		$this->diagnostics?->flush();
 	}
 
 	/**

@@ -2,9 +2,9 @@
 
 Open-source WordPress audit logs and PHP diagnostics for DevOps-managed sites, designed as a must-use plugin.
 
-**Status: development.** The must-use loader, operator configuration, bounded InnoDB storage, audit collectors and reproducible development/test environment are implemented. PHP diagnostics, panel authentication and the frontend are still pending. There is no production-ready release yet.
+**Status: development.** The must-use loader, operator configuration, bounded InnoDB storage, audit collectors, bounded PHP diagnostics and reproducible development/test environment are implemented. Panel authentication and the frontend are still pending. There is no production-ready release yet.
 
-See [local setup](docs/testing/local-setup.md), [phase 1 verification](docs/testing/phase-1-verification.md), [phase 2 storage verification](docs/testing/phase-2-storage.md) and [phase 3 audit coverage](docs/testing/phase-3-audit.md) for test results, commands and remaining limitations. Updater completion alone never proves a successful bulk or core update; unresolved observations remain unknown. These results validate the implemented phases, not the complete planned plugin.
+See [local setup](docs/testing/local-setup.md), [phase 1 verification](docs/testing/phase-1-verification.md), [phase 2 storage verification](docs/testing/phase-2-storage.md), [phase 3 audit coverage](docs/testing/phase-3-audit.md) and [phase 4 diagnostics](docs/testing/phase-4-diagnostics.md) for test results, commands and remaining limitations. Updater completion alone never proves a successful bulk or core update; unresolved observations remain unknown. PHP capture respects suppression and yields nonfatal handling to a pre-existing handler because PHP does not expose that handler's severity mask. These results validate the implemented phases, not the complete planned plugin.
 
 ## Planned behavior
 

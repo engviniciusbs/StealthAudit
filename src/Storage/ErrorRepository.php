@@ -11,15 +11,28 @@ namespace StealthAudit\Storage;
 /** Accepts reduced messages only; never accept raw request/error objects. */
 final class ErrorRepository extends Records {
 	/**
+	 * Coarse result without database exception details.
+	 *
+	 * @var string
+	 */
+	private string $status = 'available';
+
+	/** Last append health; never equate a rejected append with an empty log. */
+	public function status(): string {
+		return $this->status;
+	}
+	/**
 	 * Persist one bounded diagnostic occurrence; no synchronous aggregation scan.
 	 *
 	 * @param array<string,mixed> $record Reduced diagnostic fields from sanitizer.
 	 * @param int                 $now UTC Unix timestamp.
 	 */
 	public function append( array $record, int $now ): bool {
-		$reserved = false;
-		$started  = $this->budget->begin();
+		$this->status = 'limited';
+		$reserved     = false;
+		$started      = $this->budget->begin();
 		if ( null === $started ) {
+			$this->status = $this->budget->storage_failed() ? 'storage_unavailable' : 'limited';
 			return false;
 		}
 		try {
@@ -40,17 +53,32 @@ final class ErrorRepository extends Records {
 			$fingerprint = hash( 'sha256', $severity . "\0" . $message . "\0" . $file . "\0" . $line );
 			$bytes       = strlen( $severity . $message . $file ) + 120;
 			if ( ! $this->budget->reserve( 'errors', $bytes, $now ) ) {
+				$this->status = $this->budget->storage_failed() ? 'storage_unavailable' : 'limited';
 				return false;
 			}
 			$reserved = true;
-			return 1 === $this->db->execute( 'INSERT INTO %i (record_version,first_seen,last_seen,severity,message,file,line,fingerprint,occurrences,logical_bytes) VALUES (1,%s,%s,%s,%s,%s,%d,%s,1,%d)', $this->db->table( 'errors' ), gmdate( 'Y-m-d H:i:s', $now ), gmdate( 'Y-m-d H:i:s', $now ), $severity, $message, $file, $line, $fingerprint, $bytes );
+			// Fixed five-minute UTC buckets cannot extend the original message's retention.
+			// Every occurrence reserves full capacity conservatively, including updates.
+			$window = intdiv( $now, 300 ) * 300;
+			$rows   = $this->db->rows( 'SELECT id FROM %i WHERE fingerprint=%s AND first_seen>=%s AND first_seen<%s ORDER BY id DESC LIMIT 1', $this->db->table( 'errors' ), $fingerprint, gmdate( 'Y-m-d H:i:s', $window ), gmdate( 'Y-m-d H:i:s', $window + 300 ) );
+			if ( array() !== $rows ) {
+				$written = 1 === $this->db->execute( 'UPDATE %i SET occurrences=LEAST(occurrences+1,2147483647),first_seen=LEAST(first_seen,%s),last_seen=GREATEST(last_seen,%s) WHERE id=%d AND fingerprint=%s AND first_seen>=%s AND first_seen<%s AND occurrences<2147483647', $this->db->table( 'errors' ), gmdate( 'Y-m-d H:i:s', $now ), gmdate( 'Y-m-d H:i:s', $now ), (int) $rows[0]['id'], $fingerprint, gmdate( 'Y-m-d H:i:s', $window ), gmdate( 'Y-m-d H:i:s', $window + 300 ) );
+			} else {
+				$written = 1 === $this->db->execute( 'INSERT INTO %i (record_version,first_seen,last_seen,severity,message,file,line,fingerprint,occurrences,logical_bytes) VALUES (1,%s,%s,%s,%s,%s,%d,%s,1,%d)', $this->db->table( 'errors' ), gmdate( 'Y-m-d H:i:s', $now ), gmdate( 'Y-m-d H:i:s', $now ), $severity, $message, $file, $line, $fingerprint, $bytes );
+			}
+			$this->status = $written ? 'available' : 'limited';
+			return $written;
 		} catch ( \Throwable $failure ) {
+			$this->status = 'storage_unavailable';
 			return false;
 		} finally {
 			if ( $reserved ) {
 				$this->budget->complete( 'errors', $now );
 			}
 			$this->budget->finish( $started );
+			if ( $this->budget->storage_failed() ) {
+				$this->status = 'storage_unavailable';
+			}
 		}
 	}
 

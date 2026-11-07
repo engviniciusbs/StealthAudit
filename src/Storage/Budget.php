@@ -48,6 +48,11 @@ final class Budget {
 		return $this->failed || $this->spent / 1000000 >= $this->config->limits['storage_work_ms'] ? null : hrtime( true );
 	}
 
+	/** Whether this request has observed unavailable or malformed storage state. */
+	public function storage_failed(): bool {
+		return $this->failed;
+	}
+
 	/**
 	 * Charge synchronous work after returning; this cannot interrupt SQL in flight.
 	 *
