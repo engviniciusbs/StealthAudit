@@ -20,16 +20,16 @@ Proteção contra desativação casual. Um administrador que instala PHP pode in
 
 | Área | Escolha e critério |
 | --- | --- |
-| Plataforma | PHP 8.3+; matriz inicial 8.3/8.4/8.5, WordPress 7.1 com patch 7.1.4 observado. Revalidar patch no início e fixar a versão de teste, sem tags latest. |
+| Plataforma | PHP 8.3+; matriz inicial 8.3/8.4/8.5, WordPress 7.1.4 fixado pela API oficial e tag na fase 0. Revalidar patch antes do release, sem tags latest. |
 | Banco | Tabelas próprias InnoDB; MariaDB 10.11 como base e MySQL 8.0+ como segunda família, a declarar suportada somente após integração real. Charset/collation da instalação. |
 | Extensões | mysqli e requisitos normais do WordPress; sodium, iconv e XMLWriter para acesso/QR. Loader verifica requisitos antes de incluir arquivos incompatíveis. Sem chave/cifra válida, negar painel, preservando coleta quando seus requisitos independentes estiverem atendidos. |
 | Linguagem e painel | PHP com namespace StealthAudit e PSR-4; templates próprios, CSS e JavaScript pequenos, servidos localmente. Hallmark ASCII Terminal em scope app, tokens semânticos, fonte mono local/fallback e tabelas operacionais. Sem necessidade de React, CDN, SPA ou build Node na hospedagem. Strings traduzíveis, interface inicial pt-BR. |
-| TOTP/QR | OTPHP 11.6.x e BaconQrCode 3.x, com versões/transitivas travadas após resolução e checagem de manutenção. PSR Clock injetável para testes. Não usar QR externo. |
+| TOTP/QR | OTPHP 11.5.0 e BaconQrCode 3.1.1, com versões/transitivas travadas após resolução e checagem de manutenção. PSR Clock injetável para testes. Não usar QR externo. |
 | Cifra | Sodium XChaCha20-Poly1305, chave exclusiva de instalação fora do banco, nonce aleatório por envelope e AAD de contexto. Nada de cifra/algoritmo TOTP próprios. |
 | Persistência | Duas tabelas de registros, mais uma tabela auxiliar de estado para fator/sessão/limites/locks. A auxiliar concretiza o 2FA e não constitui nova categoria de log. Não usar transients como autoridade de segurança. |
 | GeoIP | GeoIp2 Database Reader, MMDB fornecido pelo operador e validado localmente. Consultar na leitura, sem persistir país/cidade históricos e sem incluir base no ZIP. |
 | Desenvolvimento | wp-env 12.1.0, Node >=22.13 e Docker. Configurações isoladas de desenvolvimento/testes. Composer/PHPCS/PHPUnit dentro de containers, sem depender de PHP local. |
-| Distribuição | Dependências de produção prefixadas no build; ZIP com autoloader pronto. Licença candidata GPL-3.0-or-later, a confirmar com inventário das dependências antes de inserir LICENSE/publicar. Preservar avisos de terceiros e separar termos da base GeoIP. |
+| Distribuição | Dependências de produção prefixadas no build; ZIP com autoloader pronto. GPL-3.0-or-later escolhida na fase 0 para o código próprio; inserir LICENSE e conferir inventário transitivo com o lockfile antes de publicar pacote. Preservar avisos de terceiros e separar termos da base GeoIP. |
 
 Essas escolhas são detalhes de implementação dentro do design aprovado. Compatibilidade não demonstrada é pendência de teste, não promessa. Versões exatas de bibliotecas/ferramentas serão registradas em lockfiles na fase 1.
 

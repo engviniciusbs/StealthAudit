@@ -2,6 +2,8 @@
 
 Consultado em 2026-11-07. Material de apoio ao [plano](2026-11-07-implementation-plan.md), não código implementado. Fontes primárias; versões e trechos de branches móveis devem ser fixados no início da execução.
 
+Revalidação de execução da fase 0: ver [compatibilidade](../testing/compatibility.md) e [cobertura de eventos](../testing/event-coverage.md). WordPress 7.1.4 foi confirmado pela API oficial e hooks conferidos na tag. A referência inicial a OTPHP 11.6.x foi corrigida para o release publicado 11.5.0; a branch 11.6.x não será usada como dependência estável. BaconQrCode v3.1.1 e PHP-Scoper 0.18.20 também foram confirmados. Sem dependências instaladas ou código implementado nesta revalidação.
+
 ## Evidência local
 
 - Projeto contém a especificação e sua revisão; não há código, manifestos, testes ou repositório Git inicializado.
@@ -79,9 +81,9 @@ Fontes: [set_error_handler](https://www.php.net/manual/en/function.set-error-han
 Fontes copiáveis:
 
 - [wp_get_session_token](https://developer.wordpress.org/reference/functions/wp_get_session_token/), [WP_Session_Tokens, Methods/Source](https://developer.wordpress.org/reference/classes/wp_session_tokens/), [wp_check_password](https://developer.wordpress.org/reference/functions/wp_check_password/), [wp_verify_nonce](https://developer.wordpress.org/reference/functions/wp_verify_nonce/).
-- [OTPHP doc/index.md](https://github.com/Spomky-Labs/otphp/blob/11.6.x/doc/index.md), [TOTP.php](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.6.x/src/TOTP.php), [composer.json](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.6.x/composer.json), [SECURITY.md](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.6.x/SECURITY.md).
+- [OTPHP doc/index.md](https://github.com/Spomky-Labs/otphp/blob/11.5.0/doc/index.md), [TOTP.php](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.5.0/src/TOTP.php), [composer.json](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.5.0/composer.json), [SECURITY.md](https://raw.githubusercontent.com/Spomky-Labs/otphp/11.5.0/SECURITY.md).
 - [RFC 6238, §5.2 e apêndice B](https://www.rfc-editor.org/rfc/rfc6238), [OWASP MFA](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html).
-- [BaconQrCode README, Example usage/backends](https://github.com/Bacon/BaconQrCode), [Writer.php](https://raw.githubusercontent.com/Bacon/BaconQrCode/main/src/Writer.php), [SVG backend](https://raw.githubusercontent.com/Bacon/BaconQrCode/main/src/Renderer/Image/SvgImageBackEnd.php).
+- [BaconQrCode v3.1.1 README, Example usage/backends](https://github.com/Bacon/BaconQrCode/tree/v3.1.1#readme), [Writer.php v3.1.1](https://raw.githubusercontent.com/Bacon/BaconQrCode/v3.1.1/src/Writer.php), [SVG backend v3.1.1](https://raw.githubusercontent.com/Bacon/BaconQrCode/v3.1.1/src/Renderer/Image/SvgImageBackEnd.php).
 - [sodium encrypt](https://www.php.net/manual/en/function.sodium-crypto-aead-xchacha20poly1305-ietf-encrypt.php), [decrypt](https://www.php.net/manual/en/function.sodium-crypto-aead-xchacha20poly1305-ietf-decrypt.php), Parameters/Examples.
 
 APIs permitidas e armadilhas:
@@ -91,7 +93,7 @@ APIs permitidas e armadilhas:
 | wp_get_session_token(): string | Extrai token, não valida a autenticidade do cookie. Validar sessão WordPress e usuário, não confiar na extração isolada. |
 | WP_Session_Tokens::get_instance(user_id)->verify(token) | Valida existência/expiração; get/destroy/destroy_all para operações documentadas. Usar derivação do token na prova local, nunca armazená-lo em logs. |
 | wp_check_password(password, hash, user_id = ''): bool | Reconfirma senha; não redefinir senha nem implementar esquema de hash do WordPress. |
-| TOTP::generate(clock, secretSize); TOTP::createFromSecret(secret, clock) | OTPHP 11.6.x, MIT, PHP >=8.1. Clock PSR explícito. create() e setters mutáveis têm deprecações. |
+| TOTP::generate(clock, secretSize); TOTP::createFromSecret(secret, clock) | OTPHP 11.5.0, MIT, PHP >=8.1. Clock PSR explícito. create() e setters mutáveis têm deprecações. |
 | verify(code, timestamp = null, leeway = null): bool; at(timestamp): string | Retorno não consome código; leeway é segundos e menor que period. Não passar 30 para período 30. Identificar passo aceito e consumi-lo atomicamente. |
 | getProvisioningUri(): string | Gerar URI local. Não usar QR externo da documentação, pois revela segredo. |
 | Bacon ImageRenderer + RendererStyle + SvgImageBackEnd; Writer::writeString(content, ...) | SVG local em memória; PHP ^8.1, iconv e XMLWriter. Sem Imagick obrigatório, arquivos de QR ou scripts externos. |
@@ -108,7 +110,7 @@ Biblioteca geoip2/geoip2 3.4.0 é Apache-2.0 e requer PHP >=8.1; licença da bib
 
 ## D8 — testes e empacotamento
 
-Fontes: [WordPress composer.json 7.1.4](https://raw.githubusercontent.com/WordPress/wordpress-develop/7.1.4/composer.json), [phpunit.xml.dist 7.1.4](https://raw.githubusercontent.com/WordPress/wordpress-develop/7.1.4/phpunit.xml.dist), [WPCS Installation](https://github.com/WordPress/WordPress-Coding-Standards#installation), [Plugin Check How to use](https://github.com/WordPress/plugin-check#how-to-use), [PHP-Scoper Usage](https://github.com/humbug/php-scoper#usage), [configuração](https://github.com/humbug/php-scoper/blob/main/docs/configuration.md), [Composer CLI](https://getcomposer.org/doc/03-cli.md).
+Fontes: [WordPress composer.json 7.1.4](https://raw.githubusercontent.com/WordPress/wordpress-develop/7.1.4/composer.json), [phpunit.xml.dist 7.1.4](https://raw.githubusercontent.com/WordPress/wordpress-develop/7.1.4/phpunit.xml.dist), [WPCS Installation](https://github.com/WordPress/WordPress-Coding-Standards#installation), [Plugin Check How to use](https://github.com/WordPress/plugin-check#how-to-use), [PHP-Scoper 0.18.20 Usage](https://github.com/humbug/php-scoper/tree/0.18.20#usage), [configuração 0.18.20](https://github.com/humbug/php-scoper/blob/0.18.20/docs/configuration.md), [Composer CLI](https://getcomposer.org/doc/03-cli.md).
 
 Copiar padrões de bootstrap PHPUnit da versão do core; não impor a versão mais nova de PHPUnit sem provar compatibilidade. WPCS com PHPCS e PHPCompatibility; Plugin Check auxilia análise e pode reportar diferenças de distribuição MU a justificar. Não tratar aprovação da ferramenta como certificação de segurança.
 
