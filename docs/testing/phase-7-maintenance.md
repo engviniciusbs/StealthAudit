@@ -96,6 +96,6 @@ Efeitos no site de testes: o esquema migrou para a versão 2 e o evento `stealth
 - **Linhas apagadas atrás do cursor** durante uma recontagem em várias execuções ficam sobrecontadas até a próxima recontagem completa (conservador).
 - **`pending` recente** (menos de 900–960 s) adia a publicação daquele tipo após 3 novas tentativas na execução (o estado auxiliar só na execução seguinte); um pendente órfão deixa de bloquear depois disso, mesmo com gravações contínuas. A UI mostra "recontagem adiada" enquanto isso.
 - **Backups e cópias externas** seguem a política do operador: o expurgo físico não alcança dumps, réplicas, binlogs ou backups do host, e o plugin não promete apagá-los.
-- **Remoção do loader** deixa o evento WP-Cron agendado sem handler (o WordPress apenas o reagenda); os dados não são apagados por isso. A remoção explícita fica para os runbooks da 7b.
+- **Remoção do loader** deixa o evento WP-Cron agendado sem handler (o WordPress apenas o reagenda); os dados não são apagados por isso. A remoção explícita está no runbook [maintenance-and-data.md](../operations/maintenance-and-data.md#remoção-explícita-dos-dados).
 - O `ensure()` desta versão migra automaticamente o site existente para o esquema 2 na primeira requisição; durante a migração (lease de 120 s) uma requisição concorrente fica sem armazenamento e não coleta.
 - Não testado: MySQL, PHP 8.4/8.5, tabelas reais de 100 mil linhas sob carga de escrita simultânea, hospedagem com `DISABLE_WP_CRON` real.

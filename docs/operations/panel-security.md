@@ -1,5 +1,7 @@
 # Chave, rotação e recuperação offline
 
+Runbooks do operador: [instalação, configuração e atualização](installation.md) · [manutenção, backups, recuperação, desativação e remoção de dados](maintenance-and-data.md) · [GeoIP](geoip.md) · chave e fatores (este documento).
+
 O operador controla PHP, configuração externa e backup do banco. Estes procedimentos são locais e nunca oferecem bypass HTTP. O script `tools/security-operator.php` é ferramenta do repositório de operação, não uma rota de painel. Use uma cópia auditada no ambiente do operador com PHP 8.3+, WordPress e dependências instaladas; não exponha tools no webroot.
 
 ## Configuração e backup
