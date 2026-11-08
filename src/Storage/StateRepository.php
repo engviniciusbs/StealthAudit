@@ -63,23 +63,53 @@ final class StateRepository {
 		if ( str_starts_with( $key, 'budget:' ) ) {
 			throw new StorageException( 'Reserved state identity.' );
 		}
+		$now = time();
 		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
-			$budget = $this->get( 'budget:state', time() );
+			$budget = $this->get( 'budget:state', $now );
 			if ( null === $budget || ! isset( $budget['payload']['rows'] ) || ! is_int( $budget['payload']['rows'] ) || $budget['payload']['rows'] < 3 || $budget['payload']['rows'] >= $this->capacity ) {
 				return false;
 			}
 			$next = $budget['payload'];
 			++$next['rows'];
-			if ( $this->compare_and_swap( 'budget:state', $budget['revision'], $next, null, time() ) ) {
-				// Failed insertion may overcount. Only maintenance can release capacity.
-				$revision = random_int( 1, PHP_INT_MAX >> 1 );
-				if ( null === $expires ) {
-					return 1 === $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,%d,%s,NULL)', $this->db->table( 'state' ), $key, $revision, $encoded );
+			// The slot stays pending until the INSERT returns, so a recount never counts past an
+			// INSERT that is still running, however long it stalls (see Maintenance).
+			$next = Budget::open_pending( $next, $now );
+			if ( $this->compare_and_swap( 'budget:state', $budget['revision'], $next, null, $now ) ) {
+				try {
+					// Failed insertion may overcount. Only maintenance can release capacity.
+					$revision = random_int( 1, PHP_INT_MAX >> 1 );
+					if ( null === $expires ) {
+						return 1 === $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,%d,%s,NULL)', $this->db->table( 'state' ), $key, $revision, $encoded );
+					}
+					return 1 === $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,%d,%s,%s)', $this->db->table( 'state' ), $key, $revision, $encoded, gmdate( 'Y-m-d H:i:s', $expires ) );
+				} finally {
+					$this->settle_pending( $now );
 				}
-				return 1 === $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,%d,%s,%s)', $this->db->table( 'state' ), $key, $revision, $encoded, gmdate( 'Y-m-d H:i:s', $expires ) );
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Close this create()'s pending slot; a lost race leaves it to age out conservatively.
+	 *
+	 * @param int $now Timestamp of the reservation.
+	 */
+	private function settle_pending( int $now ): void {
+		try {
+			for ( $attempt = 0; $attempt < 3; ++$attempt ) {
+				$budget = $this->get( 'budget:state', $now );
+				if ( null === $budget || ! is_int( $budget['payload']['pending'] ?? null ) || $budget['payload']['pending'] < 1 ) {
+					return;
+				}
+				if ( $this->compare_and_swap( 'budget:state', $budget['revision'], Budget::close_pending( $budget['payload'], $now ), null, $now ) ) {
+					return;
+				}
+			}
+		} catch ( \Throwable $failure ) {
+			// Never mask the INSERT result; an open slot only delays reconciliation.
+			return;
+		}
 	}
 
 	/**

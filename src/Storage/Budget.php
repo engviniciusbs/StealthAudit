@@ -14,7 +14,12 @@ use StealthAudit\Config\Configuration;
 final class Budget {
 	/** Pending reservations are bucketed per UTC minute so an orphan ages on its own. */
 	public const PENDING_BUCKET = 60;
-	/** Buckets older than this belong to dead requests; at most 16 buckets are kept. */
+	/**
+	 * Minimum age of a reservation treated as belonging to a dead request.
+	 *
+	 * A bucket is dropped only once its whole minute is older than this, so a reservation
+	 * becomes stale between 900 and 960 s after it was made; at most 17 buckets are kept.
+	 */
 	public const PENDING_STALE = 900;
 	/**
 	 * Attempt counts in this request.
@@ -104,10 +109,7 @@ final class Budget {
 					++$next['rows'];
 					$next['bytes'] += $bytes;
 					++$next['rate'];
-					++$next['pending'];
-					$bucket                               = intdiv( $now, self::PENDING_BUCKET ) * self::PENDING_BUCKET;
-					$next['pending_by_minute']            = self::recent_buckets( $next['pending_by_minute'] ?? array(), $now );
-					$next['pending_by_minute'][ $bucket ] = ( $next['pending_by_minute'][ $bucket ] ?? 0 ) + 1;
+					$next = self::open_pending( $next, $now );
 				} else {
 					$next['dropped'] = min( PHP_INT_MAX - 1, $next['dropped'] + 1 );
 				}
@@ -124,11 +126,11 @@ final class Budget {
 	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.Missing
 
 	/**
-	 * Keep only the per-minute pending buckets younger than PENDING_STALE.
+	 * Keep only the per-minute pending buckets whose minute may still be younger than PENDING_STALE.
 	 *
 	 * @param mixed $buckets Stored map of minute => count.
 	 * @param int   $now UTC timestamp.
-	 * @return array<int,int> Bounded map (at most 16 keys).
+	 * @return array<int,int> Bounded map (at most 17 keys).
 	 * @throws StorageException On a malformed map.
 	 */
 	public static function recent_buckets( mixed $buckets, int $now ): array {
@@ -140,11 +142,51 @@ final class Budget {
 			if ( ! is_int( $minute ) || ! is_int( $count ) || $count < 1 ) {
 				throw new StorageException( 'Invalid capacity state.' );
 			}
-			if ( $minute > $now - self::PENDING_STALE ) {
+			if ( $minute + self::PENDING_BUCKET > $now - self::PENDING_STALE ) {
 				$kept[ $minute ] = $count;
 			}
 		}
 		return $kept;
+	}
+
+	/**
+	 * Open one pending reservation in the total and in its minute bucket.
+	 *
+	 * Shared by record budgets and the auxiliary state budget (StateRepository::create()).
+	 *
+	 * @param array<string,mixed> $payload Budget payload with an integer pending.
+	 * @param int                 $now UTC timestamp of the reservation.
+	 * @return array<string,mixed> Updated payload.
+	 * @throws StorageException On a malformed map.
+	 */
+	public static function open_pending( array $payload, int $now ): array {
+		$bucket                       = intdiv( $now, self::PENDING_BUCKET ) * self::PENDING_BUCKET;
+		$payload['pending']           = ( is_int( $payload['pending'] ?? null ) ? $payload['pending'] : 0 ) + 1;
+		$minute                       = self::recent_buckets( $payload['pending_by_minute'] ?? array(), $now );
+		$minute[ $bucket ]            = ( $minute[ $bucket ] ?? 0 ) + 1;
+		$payload['pending_by_minute'] = $minute;
+		return $payload;
+	}
+
+	/**
+	 * Close one pending reservation opened with the same $now.
+	 *
+	 * @param array<string,mixed> $payload Budget payload with pending >= 1.
+	 * @param int                 $now UTC timestamp given to open_pending().
+	 * @return array<string,mixed> Updated payload.
+	 * @throws StorageException On a malformed map.
+	 */
+	public static function close_pending( array $payload, int $now ): array {
+		--$payload['pending'];
+		$bucket = intdiv( $now, self::PENDING_BUCKET ) * self::PENDING_BUCKET;
+		$minute = self::recent_buckets( $payload['pending_by_minute'] ?? array(), $now );
+		if ( ( $minute[ $bucket ] ?? 0 ) > 1 ) {
+			--$minute[ $bucket ];
+		} else {
+			unset( $minute[ $bucket ] );
+		}
+		$payload['pending_by_minute'] = $minute;
+		return $payload;
 	}
 
 	/**
@@ -171,17 +213,7 @@ final class Budget {
 					$this->failed = true;
 					return;
 				}
-				$payload = $row['payload'];
-				--$payload['pending'];
-				// Same $now as the reservation: release its own minute bucket if still kept.
-				$bucket = intdiv( $now, self::PENDING_BUCKET ) * self::PENDING_BUCKET;
-				$minute = self::recent_buckets( $payload['pending_by_minute'] ?? array(), $now );
-				if ( ( $minute[ $bucket ] ?? 0 ) > 1 ) {
-					--$minute[ $bucket ];
-				} else {
-					unset( $minute[ $bucket ] );
-				}
-				$payload['pending_by_minute'] = $minute;
+				$payload = self::close_pending( $row['payload'], $now );
 				if ( $this->state->compare_and_swap( 'budget:' . $kind, $row['revision'], $payload, null, $now ) ) {
 					return;
 				}

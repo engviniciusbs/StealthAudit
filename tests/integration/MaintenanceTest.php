@@ -172,7 +172,8 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 'blocked', $this->storage->maintenance->run( $this->now )['result'] );
 		self::assertSame( 'blocked', $this->storage->maintenance->report( $this->now )['state'] );
 		self::assertSame( array( 1202, 1 ), array_values( array_intersect_key( $this->storage->state->get( 'budget:events', $this->now )['payload'], array_flip( array( 'rows', 'pending' ) ) ) ) );
-		$stale = $this->now + Maintenance::PENDING_STALE;
+		// Buckets are whole minutes: a reservation is stale 900..960 s after it was made.
+		$stale = $this->now + Budget::PENDING_STALE + Budget::PENDING_BUCKET;
 		self::assertSame( 'complete', $this->storage->maintenance->run( $stale )['result'] );
 		$budget = $this->storage->state->get( 'budget:events', $stale )['payload'];
 		// The blocked run's two full batches each saw that reservation in flight, so the resumed
@@ -262,7 +263,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 			self::assertTrue( $budget->reserve( 'events', 100, $time ) );
 			$budget->complete( 'events', $time );
 			$payload = $this->storage->state->get( 'budget:events', $time )['payload'];
-			self::assertLessThanOrEqual( 16, count( $payload['pending_by_minute'] ) );
+			self::assertLessThanOrEqual( 17, count( $payload['pending_by_minute'] ) );
 			self::assertSame( 1, $payload['pending'] );
 			self::assertSame( $time, $payload['second'] );
 			if ( $start + 300 === $time ) {
@@ -288,7 +289,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 9, $run['batches'] );
 		$budget->complete( 'errors', $this->now );
 		self::assertSame( 'complete', $this->storage->maintenance->run( $this->now )['result'] );
-		// Real concurrency: another process completes its reservation 150 ms after "go".
+		// Real concurrency: another process completes its reservation 40 ms after "go".
 		[ $process, $pipes ] = $this->worker( 'pending' );
 		fwrite( $pipes[0], "go\n" );
 		fclose( $pipes[0] );
@@ -341,10 +342,54 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 'unavailable', $full->maintenance->report( $this->now )['state'] );
 	}
 
-	private function worker( string $mode ): array {
+	public function test_auxiliary_recount_never_drops_below_a_stalled_create(): void {
+		$key    = 'proof:' . hash( 'sha256', 'synthetic-stalled-create' );
+		$table  = $this->db->table( 'state' );
+		$locker = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$locker->set_prefix( $this->prefix );
+		try {
+			// Another connection holds the gap where the key would go: the INSERT waits.
+			self::assertNotFalse( $locker->query( 'START TRANSACTION' ) );
+			self::assertNotFalse( $locker->query( $locker->prepare( 'SELECT state_key FROM %i WHERE state_key=%s FOR UPDATE', $table, $key ) ) );
+			[ $process, $pipes ] = $this->worker( 'create', array( 'key' => $key ) );
+			fwrite( $pipes[0], "go\n" );
+			fclose( $pipes[0] );
+			$deadline = microtime( true ) + 10;
+			do {
+				usleep( 20000 );
+				$budget = $this->storage->state->get( 'budget:state', $this->now )['payload'];
+			} while ( ( $budget['pending'] ?? 0 ) < 1 && microtime( true ) < $deadline );
+			self::assertSame( 1, $budget['pending'] );
+			// Far longer than any sleep-based guess; the INSERT is still blocked.
+			usleep( 500000 );
+			self::assertSame( array(), $this->db->rows( 'SELECT state_key FROM %i WHERE state_key=%s', $table, $key ) );
+			$run = $this->storage->maintenance->run( $this->now );
+			self::assertSame( 'partial', $run['result'] );
+			$physical = $this->rows_in( 'state' );
+			$counted  = $this->storage->state->get( 'budget:state', $this->now )['payload']['rows'];
+			self::assertGreaterThanOrEqual( $physical, $counted );
+			self::assertSame( $physical + 1, $counted );
+		} finally {
+			$locker->query( 'ROLLBACK' );
+			$locker->close();
+		}
+		self::assertSame( '1', trim( stream_get_contents( $pipes[1] ) ) );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		self::assertSame( 0, proc_close( $process ) );
+		// The INSERT landed and its slot settled; the counter still covers every physical row
+		// (a recount published during the stall would now be one below), and the next is exact.
+		self::assertSame( 0, $this->storage->state->get( 'budget:state', $this->now )['payload']['pending'] );
+		self::assertGreaterThanOrEqual( $this->rows_in( 'state' ), $this->storage->state->get( 'budget:state', $this->now )['payload']['rows'] );
+		self::assertSame( 'complete', $this->storage->maintenance->run( $this->now )['result'] );
+		self::assertSame( $this->rows_in( 'state' ), $this->storage->state->get( 'budget:state', $this->now )['payload']['rows'] );
+		self::assertNotNull( $this->storage->state->get( $key, $this->now ) );
+	}
+
+	private function worker( string $mode, array $extra = array() ): array {
 		$process = proc_open( array( PHP_BINARY, dirname( __DIR__ ) . '/fixtures/storage-worker.php' ), array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes );
 		self::assertIsResource( $process );
-		fwrite( $pipes[0], json_encode( array( 'user' => DB_USER, 'password' => DB_PASSWORD, 'name' => DB_NAME, 'host' => DB_HOST, 'prefix' => $this->prefix, 'mode' => $mode, 'now' => $this->now ) ) . "\n" );
+		fwrite( $pipes[0], json_encode( array( 'user' => DB_USER, 'password' => DB_PASSWORD, 'name' => DB_NAME, 'host' => DB_HOST, 'prefix' => $this->prefix, 'mode' => $mode, 'now' => $this->now ) + $extra ) . "\n" );
 		stream_set_timeout( $pipes[1], 30 );
 		self::assertSame( "ready\n", fgets( $pipes[1] ) );
 		return array( $process, $pipes );

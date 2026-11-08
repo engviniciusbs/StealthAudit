@@ -22,8 +22,6 @@ final class Maintenance {
 	/** A recent pending at the final read is retried this many times within one run. */
 	public const PENDING_RETRIES = 3;
 	public const PENDING_WAIT_US = 25000;
-	/** Settle time between reading the auxiliary budget and counting its rows. */
-	public const STATE_SETTLE_US = 100000;
 	/** Upper bound of logical bytes for one record (errors: 16+1024+255+120 = 1415). */
 	public const RECORD_BYTES = array(
 		'events' => 1024,
@@ -259,8 +257,9 @@ final class Maintenance {
 		// The maintenance lease row is permanent so maintenance never needs free capacity.
 		$deleted = $this->db->execute( 'DELETE FROM %i WHERE expires_at<=%s AND (state_key LIKE %s OR state_key LIKE %s OR state_key LIKE %s) AND state_key<>%s ORDER BY expires_at,state_key LIMIT %d', $this->db->table( 'state' ), gmdate( 'Y-m-d H:i:s', $now ), 'proof:%', 'limit:%', 'lease:%', self::lease_key(), $limit );
 		if ( $deleted > 0 ) {
-			$payload         = $budget['payload'];
-			$payload['rows'] = max( 3, $payload['rows'] - $deleted );
+			$payload = $budget['payload'];
+			// Five fixed rows: three budgets, the maintenance lease and its status.
+			$payload['rows'] = max( 5, $payload['rows'] - $deleted );
 			$this->state->compare_and_swap( 'budget:state', $budget['revision'], $payload, null, $now );
 		}
 		return $deleted;
@@ -269,34 +268,38 @@ final class Maintenance {
 	/**
 	 * Recount auxiliary rows in one statement bounded by the configured capacity.
 	 *
-	 * The create() method reserves a slot by CAS and inserts in its next statement, with no pending
-	 * marker. The budget is read, then read again after STATE_SETTLE_US: a change means a
-	 * create may still be inserting, so the recount waits for the next run. A create that
-	 * reserved before the first read had the settle time to insert; one after the second
-	 * read changes the revision and fails this CAS. The count therefore never drops below
-	 * the rows in use, unless an INSERT stalls longer than the settle time (documented).
+	 * The create() method opens a pending slot in the same CAS that reserves the row and
+	 * closes it after its INSERT returns, like record reservations. The budget is read
+	 * before counting: a create still inserting at that read is a recent pending and
+	 * defers the recount (no timing guess), one that settled before it is visible to the
+	 * count, and one that reserves after it changes the revision and fails this CAS.
+	 * Pending older than Budget::PENDING_STALE belongs to a dead request and is cleared.
 	 *
 	 * @param int $now UTC timestamp.
 	 * @return bool Whether the counter now matches the physical rows.
 	 * @throws StorageException On failed database operation.
 	 */
 	private function reconcile_state( int $now ): bool {
-		$first = $this->state->get( 'budget:state', $now );
-		usleep( self::STATE_SETTLE_US );
 		$budget = $this->state->get( 'budget:state', $now );
-		if ( null === $first || null === $budget || ! is_int( $budget['payload']['rows'] ?? null ) ) {
+		if ( null === $budget || ! is_int( $budget['payload']['rows'] ?? null ) ) {
 			throw new StorageException( 'Invalid auxiliary budget.' );
 		}
-		if ( $first['revision'] !== $budget['revision'] ) {
+		$payload = $budget['payload'];
+		if ( Budget::recent_pending( $payload, $now ) > 0 ) {
 			return false;
 		}
 		$rows  = $this->db->rows( 'SELECT COUNT(*) AS n FROM (SELECT 1 FROM %i LIMIT %d) AS bounded', $this->db->table( 'state' ), $this->state_capacity + 1 );
 		$count = max( 3, (int) ( $rows[0]['n'] ?? 0 ) );
-		if ( $count === $budget['payload']['rows'] ) {
+		$open  = is_int( $payload['pending'] ?? null ) && $payload['pending'] > 0;
+		if ( $count === $payload['rows'] && ! $open ) {
 			return true;
 		}
-		$payload         = $budget['payload'];
-		$payload['rows'] = $count;
+		if ( $open ) {
+			$payload['pending']       = 0;
+			$payload['pending_reset'] = $now;
+		}
+		$payload['pending_by_minute'] = array();
+		$payload['rows']              = $count;
 		return $this->state->compare_and_swap( 'budget:state', $budget['revision'], $payload, null, $now );
 	}
 
