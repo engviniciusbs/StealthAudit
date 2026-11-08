@@ -39,6 +39,24 @@ final class DiagnosticsNormalizerTest extends TestCase {
 		self::assertSame( 12, $record['line'] );
 	}
 
+	public function test_normalizing_every_level_raises_no_diagnostic_of_its_own(): void {
+		// Regression (PHP 8.4+): reading the deprecated E_STRICT constant emitted E_DEPRECATED
+		// from inside the diagnostics path, which the collector would then record about itself.
+		$raised = array();
+		set_error_handler( static function ( int $level, string $message ) use ( &$raised ): bool {
+			$raised[] = $level . ' ' . $message;
+			return true;
+		} );
+		try {
+			foreach ( self::severities() as [ $level ] ) {
+				( new Normalizer( '/srv/synthetic-site/' ) )->normalize( $level, 'Synthetic diagnostic', '/srv/synthetic-site/index.php', 1 );
+			}
+		} finally {
+			restore_error_handler();
+		}
+		self::assertSame( array(), $raised );
+	}
+
 	public static function severities(): array {
 		return array(
 			'warning' => array( E_WARNING, 'warning' ),
@@ -47,7 +65,7 @@ final class DiagnosticsNormalizerTest extends TestCase {
 			'compile warning' => array( E_COMPILE_WARNING, 'warning' ),
 			'notice' => array( E_NOTICE, 'notice' ),
 			'user notice' => array( E_USER_NOTICE, 'notice' ),
-			'strict' => array( E_STRICT, 'notice' ),
+			'legacy strict (2048)' => array( 2048, 'notice' ),
 			'deprecated' => array( E_DEPRECATED, 'deprecated' ),
 			'user deprecated' => array( E_USER_DEPRECATED, 'deprecated' ),
 			'fatal' => array( E_ERROR, 'fatal' ),

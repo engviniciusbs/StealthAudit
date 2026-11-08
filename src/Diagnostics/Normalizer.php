@@ -12,6 +12,13 @@ namespace StealthAudit\Diagnostics;
 final class Normalizer {
 
 	/**
+	 * Value of the legacy E_STRICT level. PHP 8 never raises it and PHP 8.4 deprecated the
+	 * constant itself, so reading E_STRICT here would emit a deprecation from inside the
+	 * diagnostics path. A handler can still be passed the number, so it keeps its mapping.
+	 */
+	private const LEGACY_STRICT = 2048;
+
+	/**
 	 * Construct without inspecting the filesystem.
 	 *
 	 * @param string $root WordPress absolute root.
@@ -56,7 +63,7 @@ final class Normalizer {
 		$code = match ( $severity ) {
 			E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR => 'fatal',
 			E_WARNING, E_CORE_WARNING, E_COMPILE_WARNING, E_USER_WARNING => 'warning',
-			E_NOTICE, E_USER_NOTICE, E_STRICT => 'notice',
+			E_NOTICE, E_USER_NOTICE, self::LEGACY_STRICT => 'notice',
 			E_DEPRECATED, E_USER_DEPRECATED => 'deprecated',
 			default => 'error',
 		};

@@ -1,4 +1,4 @@
 <?xml version="1.0"?>
-<phpunit bootstrap="tests/integration/bootstrap.php" colors="true" failOnWarning="true" failOnRisky="true">
+<phpunit bootstrap="tests/integration/bootstrap.php" colors="true" failOnWarning="true" failOnRisky="true" convertDeprecationsToExceptions="true">
   <testsuites><testsuite name="WordPress"><directory>tests/integration</directory><exclude>tests/integration/bootstrap.php</exclude></testsuite></testsuites>
 </phpunit>
