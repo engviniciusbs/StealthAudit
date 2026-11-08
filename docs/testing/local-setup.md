@@ -21,6 +21,8 @@ npm run env:test:stop
 
 `test:e2e` precisa também de OpenSSL e Google Chrome locais; o que ele cria e restaura está em [phase-6-e2e.md](phase-6-e2e.md).
 
+A primeira execução de `npm run test:unit` (e de `test:integration`, `test:e2e` ou `matrix`) precisa de rede no host: `tools/geoip-test-data.mjs` baixa as bases MMDB de **teste** da MaxMind para `artifacts/geoip/` (commit fixo, SHA-256 conferido, tempo limite de 30 s por arquivo). Sem rede essa etapa falha com erro explícito em vez de travar. Depois disso os arquivos corretos ficam em cache e nenhuma requisição é feita. A matriz de compatibilidade PHP × banco roda em ambientes adicionais isolados; ver [verification.md](verification.md).
+
 O `composer install` usa as versões exatas do lockfile; não executar `update` implicitamente. As restrições `~` dos três pacotes de produção permitem apenas patches da minor contratada em uma atualização deliberada. O lock fixa OTPHP 11.5.0, BaconQrCode 3.1.1 e GeoIP2 3.4.0.
 
 `npm run env:start` / `npm run env:stop` operam o desenvolvimento em 8870. Os testes usam 8880 e outro `WP_ENV_HOME`, cache Compose e volume de banco. Cada config tem `testsEnvironment: false`: o comando correto em ambas é `run cli`, não `tests-cli`. A integração WordPress recria tabelas no banco da config de testes; nunca executá-la na config de desenvolvimento ou produção.

@@ -1,14 +1,14 @@
 # Contratos de compatibilidade
 
-Verificados em 2026-11-07 durante a fase 0. Isto fixa os alvos da implementação, não declara testes de runtime já aprovados. Ver [plano](../plans/2026-11-07-implementation-plan.md) e [cobertura de eventos](event-coverage.md).
+Verificados em 2026-11-07 durante a fase 0 como alvos; a matriz de runtime foi executada na fase 8a (2026-11-08), ver [Matriz verificada](#matriz-verificada-fase-8a) e [verification.md](verification.md). Ver [plano](../plans/2026-11-07-implementation-plan.md) e [cobertura de eventos](event-coverage.md).
 
 ## Plataforma e ferramentas
 
 | Componente | Alvo fixado | Evidência / condição |
 | --- | --- | --- |
 | WordPress | 7.1.4, single-site | [API oficial](https://api.wordpress.org/core/version-check/1.7/) retornou current/version 7.1.4; [arquivo de releases](https://wordpress.org/download/releases/) e [tag de código](https://github.com/WordPress/wordpress-develop/tree/7.1.4) conferidos. Usar pacote release, não trunk nem a árvore -src diretamente como distribuição. |
-| PHP | 8.3 como base; 8.4 e 8.5 na matriz | [Recomendação WordPress](https://wordpress.org/about/requirements/) e [suporte PHP](https://www.php.net/supported-versions.php). Compatibilidade das três versões depende da suíte da fase 8. |
-| Banco | MariaDB 10.11; MySQL 8.0+ como segunda família | InnoDB obrigatório nas tabelas próprias. Não anunciar a segunda família antes dos testes de integração/concorrência. |
+| PHP | 8.3 como base; 8.4 e 8.5 na matriz | [Recomendação WordPress](https://wordpress.org/about/requirements/) e [suporte PHP](https://www.php.net/supported-versions.php). Fase 8a: 8.3.36/8.3.x, 8.4.27 e 8.5.12 aprovados com WordPress 7.1.4 (ver matriz). |
+| Banco | MariaDB 10.11; MySQL 8.4 LTS como segunda família | InnoDB obrigatório nas tabelas próprias. Fase 8a: MariaDB 10.11.19 e MySQL 8.4.13 aprovados (integração, concorrência real e e2e). MySQL 8.0 (fim de vida em abril de 2026), 9.x e MariaDB 11.x não testados. |
 | Node | >=22.13.0 | Requisito publicado de @wordpress/env 12.1.0. Node 22.17.0 disponível na descoberta. |
 | wp-env | 12.1.0 | [Pacote publicado](https://registry.npmjs.org/@wordpress/env/12.1.0). Usar configs distintas para desenvolvimento/teste e mappings MU; não presumir banco CLI separado do web dentro da mesma config. |
 | PHP-Scoper | 0.18.20 | [Release estável](https://github.com/humbug/php-scoper/releases/tag/0.18.20) revalidado. Ferramenta de build isolada, não dependência do host. |
@@ -67,3 +67,17 @@ A base GeoIP não é relicenciada pelo projeto. Termos de download, atualizaçã
 ## Saída da fase 0
 
 Releases/APIs e hooks foram revalidados em fontes primárias; nenhuma instalação ou teste de runtime foi executado. Os próximos gates são lockfiles, disponibilidade das extensões e smoke tests na fase 1, seguidos da matriz e limites medidos na fase 8. Não declarar suporte demonstrado antes desses testes.
+
+## Matriz verificada (fase 8a)
+
+Executada em 2026-11-08 com `npm run matrix` em ambientes isolados adicionais (procedimento, versões exatas, digests e defeitos corrigidos em [verification.md](verification.md)). WordPress 7.1.4 single-site em todas as linhas.
+
+| PHP | MariaDB 10.11.19 | MySQL 8.4.13 |
+| --- | --- | --- |
+| 8.3 (8.3.36) | aprovado: unidade, integração, e2e (ambiente original de testes) | aprovado: unidade, integração, e2e |
+| 8.4 (8.4.27) | aprovado: unidade, integração, e2e | aprovado: unidade, integração, e2e; também com prefixo `wpx9_` e `utf8mb4_0900_ai_ci` (sem e2e) |
+| 8.5 (8.5.12) | aprovado: unidade, integração, e2e | aprovado: unidade, integração, e2e |
+
+Prefixo `sa_alt_` com `utf8mb4_general_ci` no MariaDB: ver [verification.md](verification.md). "Integração" inclui os testes com dois processos PHP reais. Runner: PHPUnit 9.6.38 com yoast/phpunit-polyfills 4.0.0, compatível nas três versões de PHP. Aviso de infraestrutura: o WP-CLI 2.12.0 emite deprecations próprias no PHP 8.5; não é código do StealthAudit.
+
+Suporte declarado: somente as combinações aprovadas acima. Qualquer outra versão de PHP, banco, WordPress, multisite ou hospedagem sem Docker continua sem evidência.
