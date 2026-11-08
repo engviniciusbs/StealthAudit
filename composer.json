@@ -29,6 +29,7 @@
   "scripts": {
     "test:unit": "phpunit -c phpunit.xml.dist",
     "test:integration": "phpunit -c phpunit.integration.xml.dist",
+    "test:concurrency": "phpunit -c phpunit.integration.xml.dist --group concurrency",
     "lint": "php tools/lint.php",
     "quality": ["@lint", "phpcs", "phpstan analyse --no-progress --memory-limit=512M"]
   }

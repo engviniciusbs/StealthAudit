@@ -211,6 +211,7 @@ final class StorageTest extends PHPUnit\Framework\TestCase {
 		self::assertFalse( $this->storage->schema->current() );
 	}
 
+	/** @group concurrency */
 	public function test_real_two_process_cas_and_capacity_reservations(): void {
 		self::assertTrue( $this->storage->state->create( 'factor:4', array( 'generation' => 1 ), null ) );
 		$revision = $this->storage->state->get( 'factor:4', time() )['revision'];

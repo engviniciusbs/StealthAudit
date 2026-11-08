@@ -16,7 +16,9 @@ if ( "go\n" !== fgets( STDIN ) ) {
 	exit( 2 );
 }
 // Each attempt is [user, origin]; the outcome of every call is counted, never retried here.
-$counts = array( 'ok' => 0, 'exhausted' => 0, 'unavailable' => 0 );
+// start/end are CLOCK_MONOTONIC (hrtime) around the first and last call, comparable between
+// processes of one host, so the test can prove the two workers really overlapped.
+$counts = array( 'ok' => 0, 'exhausted' => 0, 'unavailable' => 0, 'start' => hrtime( true ), 'end' => 0 );
 foreach ( $input['attempts'] as [ $user, $origin ] ) {
 	try {
 		$limiter->consume( (int) $user, $origin, (int) $input['now'] );
@@ -27,4 +29,5 @@ foreach ( $input['attempts'] as [ $user, $origin ] ) {
 		++$counts['unavailable'];
 	}
 }
+$counts['end'] = hrtime( true );
 echo json_encode( $counts );

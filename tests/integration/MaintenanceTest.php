@@ -80,6 +80,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		$this->storage->maintenance->run( $this->now, 101 );
 	}
 
+	/** @group concurrency */
 	public function test_two_workers_race_on_the_lease_and_overdue_runs_are_reported(): void {
 		$this->raw_events( array_fill( 0, 3000, $this->now - 400 * DAY_IN_SECONDS ) );
 		self::assertSame( array( 'busy', 'complete' ), $this->workers( 'maintenance' ) );
@@ -185,6 +186,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 1201, $this->storage->state->get( 'budget:events', $stale )['payload']['rows'] );
 	}
 
+	/** @group concurrency */
 	public function test_schema_migration_from_version_1_is_idempotent_contested_and_keeps_cursors(): void {
 		$base = $this->now - DAY_IN_SECONDS;
 		$this->raw_errors( array( $base, $base, $base + 10, $base + 10, $base + 10, $base + 20, $base + 30 ) );
@@ -280,6 +282,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( array( 0, array(), $late, 0 ), array( $payload['pending'], $payload['pending_by_minute'], $payload['pending_reset'], $payload['rows'] ) );
 	}
 
+	/** @group concurrency */
 	public function test_a_recent_pending_is_retried_within_the_run_before_blocking(): void {
 		// Deterministic: a pending that never completes costs exactly three retries.
 		$budget = new Budget( $this->storage->state, Configuration::from_array( array() ) );
@@ -343,6 +346,7 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 'unavailable', $full->maintenance->report( $this->now )['state'] );
 	}
 
+	/** @group concurrency */
 	public function test_auxiliary_recount_never_drops_below_a_stalled_create(): void {
 		$key    = 'proof:' . hash( 'sha256', 'synthetic-stalled-create' );
 		$table  = $this->db->table( 'state' );

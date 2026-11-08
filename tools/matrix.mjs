@@ -39,8 +39,11 @@ function wpEnv(args, log) {
   return { ok: run.status === 0, output };
 }
 function container(service) {
+  // Exact compose project (<name>-<8 hex>): a slug may be a prefix of another slug, e.g.
+  // php84-mysql8413 and php84-mysql8413-pwpx9-c0900aici, so "starts with" is ambiguous.
+  const exact = new RegExp(`^wp-env-stealthaudit-matrix-${slug}-[0-9a-f]{8}-${service}-1$`);
   const names = execFileSync('docker', ['ps', '--filter', `name=wp-env-stealthaudit-matrix-${slug}-`, '--format', '{{.Names}}']).toString().split(/\s+/);
-  const name = names.find((n) => n.endsWith(`-${service}-1`));
+  const name = names.find((n) => exact.test(n));
   if (!name) throw new Error(`matrix ${slug}: ${service} container not running`);
   return name;
 }
@@ -107,10 +110,17 @@ try {
   if (flag('e2e')) {
     console.log(`[${slug}] e2e (several minutes) ...`);
     const run = spawnSync(process.execPath, ['tests/e2e/run.mjs'], { cwd: ROOT, env: { ...env, STEALTHAUDIT_E2E_ENV: `wp-env-stealthaudit-matrix-${slug}`, STEALTHAUDIT_E2E_HTTP_PORT: port }, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    writeFileSync(join(OUT, 'e2e.log'), `${run.stdout}${run.stderr}`);
-    results.suites['test:e2e'] = { ok: run.status === 0, summary: summary(`${run.stdout}`) };
-    console.log(`[${slug}] test:e2e: ${run.status === 0 ? 'PASS' : 'FAIL'} ${results.suites['test:e2e'].summary}`);
-    failed ||= run.status !== 0;
+    const output = `${run.stdout}${run.stderr}`;
+    writeFileSync(join(OUT, 'e2e.log'), output);
+    // The fixture runs under WP-CLI with display_errors=stderr: a StealthAudit diagnostic raised
+    // there (fixture or the loaded MU plugin) fails the suite like one in the Apache log.
+    // WP-CLI's own phar noise lives outside that path and is only reported.
+    const diagnostics = output.match(/^.*(?:PHP )?(?:Deprecated|Warning|Notice|Fatal error|Parse error):.*$/gm) || [];
+    const own = diagnostics.filter((line) => line.includes('/mu-plugins/stealthaudit'));
+    const ok = run.status === 0 && own.length === 0;
+    results.suites['test:e2e'] = { ok, summary: summary(`${run.stdout}`), stealthaudit: own.slice(0, 20), other: [...new Set(diagnostics.filter((line) => !own.includes(line)))].slice(0, 20) };
+    console.log(`[${slug}] test:e2e: ${ok ? 'PASS' : 'FAIL'} ${results.suites['test:e2e'].summary}${own.length ? ` (${own.length} StealthAudit PHP diagnostics in e2e.log)` : ''}`);
+    failed ||= !ok;
   }
 } catch (error) {
   failed = true;

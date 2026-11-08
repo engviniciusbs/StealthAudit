@@ -33,8 +33,12 @@ let usedStep = 0;
 
 // ---------- infrastructure ----------
 function container() {
+  if (!/^[a-z0-9-]+$/.test(ENV_PREFIX)) throw new Error(`invalid STEALTHAUDIT_E2E_ENV ${ENV_PREFIX}`);
+  // Exact compose project (<name>-<8 hex>): one matrix slug can be a prefix of another
+  // (php84-mysql8413 and php84-mysql8413-pwpx9-...), so "starts with" could pick the wrong site.
+  const exact = new RegExp(`^${ENV_PREFIX}-[0-9a-f]{8}-cli-1$`);
   const names = execFileSync('docker', ['ps', '--filter', `name=${ENV_PREFIX}`, '--format', '{{.Names}}']).toString().split(/\s+/);
-  const cli = names.find((n) => n.startsWith(`${ENV_PREFIX}-`) && /-cli-\d+$/.test(n));
+  const cli = names.find((n) => exact.test(n));
   if (!cli) throw new Error('wp-env test environment is not running (npm run env:test:start)');
   return cli;
 }

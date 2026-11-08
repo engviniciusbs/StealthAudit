@@ -36,13 +36,8 @@ final class AuditTest extends WP_UnitTestCase {
 		$this->db->execute( 'CREATE TABLE %i LIKE %i', $this->connection->options, $wpdb->options );
 		$config = Configuration::from_array( array( 'limits' => array( 'storage_work_ms' => 10000, 'events_per_request' => 200, 'events_per_second' => 200 ) ) );
 		$this->storage = new Storage( $this->connection, $config );
-		$original = $wpdb;
-		try {
-			$wpdb = $this->connection;
-			self::assertTrue( $this->storage->schema->ensure() );
-		} finally {
-			$wpdb = $original;
-		}
+		// Schema::install() points dbDelta() at the storage connection itself (no global swap here).
+		self::assertTrue( $this->storage->schema->ensure() );
 		$this->recorder = new Recorder( fn () => $this->storage->events, new Context() );
 		$this->collectors = new Collectors( $this->recorder );
 		$this->upgrades = new Upgrades( $this->recorder );

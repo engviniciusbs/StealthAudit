@@ -233,6 +233,7 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 2, $this->limit_count( 'account:' . $this->user ) );
 	}
 
+	/** @group concurrency */
 	public function test_two_real_processes_never_exceed_a_shared_origin_window(): void {
 		// 160 attempts from 160 distinct accounts behind one origin, split across two processes.
 		$plans = array();
@@ -241,7 +242,8 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		}
 		$outcomes = $this->limiter_workers( $plans );
 		$ok = $outcomes[0]['ok'] + $outcomes[1]['ok'];
-		self::assertSame( 160, array_sum( $outcomes[0] ) + array_sum( $outcomes[1] ) );
+		self::assertSame( 160, $this->attempts( $outcomes[0] ) + $this->attempts( $outcomes[1] ) );
+		$this->assertOverlapped( $outcomes );
 		self::assertLessThanOrEqual( 100, $ok );
 		// Every accepted attempt is counted exactly once: no lost update, no phantom slot.
 		self::assertSame( $ok, $this->limit_count( 'origin:198.51.100.9' ) );
@@ -252,10 +254,14 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		}
 	}
 
+	/** @group concurrency */
 	public function test_two_real_processes_never_exceed_one_account_window(): void {
-		// One account, 2 x 8 attempts from two different origins: only the account window applies.
-		$outcomes = $this->limiter_workers( array( array_fill( 0, 8, array( $this->user, '198.51.100.20' ) ), array_fill( 0, 8, array( $this->user, '198.51.100.21' ) ) ) );
+		// One account, 2 x 32 attempts from two different origins: only the account window applies.
+		// 32 per worker (not 8) so each worker runs long enough for the overlap to be provable.
+		$outcomes = $this->limiter_workers( array( array_fill( 0, 32, array( $this->user, '198.51.100.20' ) ), array_fill( 0, 32, array( $this->user, '198.51.100.21' ) ) ) );
 		$ok = $outcomes[0]['ok'] + $outcomes[1]['ok'];
+		self::assertSame( 64, $this->attempts( $outcomes[0] ) + $this->attempts( $outcomes[1] ) );
+		$this->assertOverlapped( $outcomes );
 		self::assertLessThanOrEqual( 10, $ok );
 		self::assertSame( $ok, $this->limit_count( 'account:' . $this->user ) );
 		self::assertSame( $ok, $this->limit_count( 'origin:198.51.100.20' ) + $this->limit_count( 'origin:198.51.100.21' ) );
@@ -274,6 +280,7 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		$this->denied( fn() => $this->access->reconfirm( 'synthetic-test-password-only', $this->nonce ) );
 	}
 
+	/** @group concurrency */
 	public function test_two_real_processes_have_one_winner_for_totp_and_recovery(): void {
 		$codes = $this->enroll();
 		$this->now += 30;
@@ -456,10 +463,32 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
+	 * Outcomes of one worker: every attempt ends ok, exhausted or unavailable. "unavailable" is
+	 * the fail-closed answer after three lost CAS rounds under contention and is allowed here.
+	 *
+	 * @param array{ok:int,exhausted:int,unavailable:int} $outcome Worker result.
+	 */
+	private function attempts( array $outcome ): int {
+		return $outcome['ok'] + $outcome['exhausted'] + $outcome['unavailable'];
+	}
+
+	/**
+	 * Prove the workers ran at the same time: their [first call, last call] monotonic intervals
+	 * intersect. Without this, two workers that ran one after the other would also pass.
+	 *
+	 * @param list<array{start:int,end:int}> $outcomes Worker results.
+	 */
+	private function assertOverlapped( array $outcomes ): void {
+		$latest_start = max( array_column( $outcomes, 'start' ) );
+		$earliest_end = min( array_column( $outcomes, 'end' ) );
+		self::assertLessThan( $earliest_end, $latest_start, sprintf( 'workers did not overlap (latest start %.1f ms after earliest end)', ( $latest_start - $earliest_end ) / 1e6 ) );
+	}
+
+	/**
 	 * Run one limiter worker per plan concurrently and return each worker's outcome counts.
 	 *
 	 * @param list<list<array{0:int,1:?string}>> $plans Attempts per process.
-	 * @return list<array{ok:int,exhausted:int,unavailable:int}>
+	 * @return list<array{ok:int,exhausted:int,unavailable:int,start:int,end:int}>
 	 */
 	private function limiter_workers( array $plans ): array {
 		$children = array();
