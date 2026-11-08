@@ -75,10 +75,16 @@ final class Schema {
 	/** Create/upgrade tables; errors are verified independently of dbDelta output. */
 	private function install(): void {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-		$charset  = $this->db->connection->get_charset_collate();
-		$events   = $this->db->table( 'events' );
-		$errors   = $this->db->table( 'errors' );
-		$state    = $this->db->table( 'state' );
+		$charset = $this->db->connection->get_charset_collate();
+		$events  = $this->db->table( 'events' );
+		$errors  = $this->db->table( 'errors' );
+		$state   = $this->db->table( 'state' );
+		// dbDelta() always runs through the global $wpdb. Point it at this schema's connection so
+		// the DDL, verify() and the lease use one session; a different global session (for
+		// example one left in a transaction) would otherwise hold metadata locks on these tables.
+		global $wpdb;
+		$global   = $wpdb;
+		$wpdb     = $this->db->connection; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restored in finally.
 		$previous = $this->db->connection->suppress_errors( true );
 		try {
 			dbDelta(
@@ -136,6 +142,7 @@ KEY expires (expires_at,state_key)
 			);
 		} finally {
 			$this->db->connection->suppress_errors( $previous );
+			$wpdb = $global; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restores the caller's connection.
 		}
 		foreach ( array( 'events', 'errors', 'state' ) as $kind ) {
 			$payload = 'state' === $kind ? '{"rows":3}' : '{"rows":0,"bytes":0,"second":0,"rate":0,"dropped":0,"pending":0}';

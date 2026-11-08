@@ -17,6 +17,7 @@ final class StorageTest extends PHPUnit\Framework\TestCase {
 	private string $prefix;
 
 	protected function setUp(): void {
+		stealthaudit_tests_commit_global_connection();
 		$this->connection = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 		$this->prefix = 'sa_it_' . bin2hex( random_bytes( 4 ) ) . '_';
 		$this->connection->set_prefix( $this->prefix );
@@ -53,6 +54,25 @@ final class StorageTest extends PHPUnit\Framework\TestCase {
 			self::assertSame( 'InnoDB', $row['ENGINE'] );
 			self::assertSame( $this->connection->collate, $row['TABLE_COLLATION'] );
 		}
+	}
+
+	public function test_schema_installs_through_its_own_connection_not_the_global_one(): void {
+		// Regression (found on MySQL 8.4): dbDelta() ran DESCRIBE/CREATE through the global $wpdb.
+		// When that session was inside a transaction (as WordPress test cases leave it), it kept
+		// metadata locks on the new tables and a DROP from the schema's own connection waited
+		// forever on MySQL. The install must not touch any other session.
+		global $wpdb;
+		$storage = $this->fresh();
+		$this->db->execute( 'DELETE FROM %i WHERE option_name=%s', $this->connection->options, 'stealthaudit_schema_version' );
+		foreach ( array( 'events', 'errors', 'state' ) as $kind ) {
+			$this->db->execute( 'DROP TABLE %i', $this->db->table( $kind ) );
+		}
+		$global  = $wpdb;
+		$queries = $wpdb->num_queries;
+		self::assertTrue( $storage->schema->ensure() );
+		self::assertSame( $global, $wpdb, 'The global connection of the caller is restored.' );
+		self::assertSame( $queries, $wpdb->num_queries, 'No schema query ran through the global connection.' );
+		$storage->schema->verify();
 	}
 
 	public function test_state_cas_conflict_generation_atomicity_and_expiry(): void {
