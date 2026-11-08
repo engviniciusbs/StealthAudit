@@ -16,6 +16,7 @@
     "test:concurrency": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer run-script --timeout=0 test:concurrency",
     "quality": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer quality",
     "test:e2e": "node tools/geoip-test-data.mjs && node tests/e2e/run.mjs",
+    "benchmark": "node benchmarks/run.mjs",
     "matrix": "node tools/matrix.mjs"
   },
   "devDependencies": {

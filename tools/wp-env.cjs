@@ -3,13 +3,15 @@
 // HTTP/MySQL on every interface; constrain all generated ports before startup.
 //
 //   node tools/wp-env.cjs [--development] <wp-env command...>
-//   node tools/wp-env.cjs --matrix=<php>,<db>[,prefix=<p>][,collate=<c>][,port=<n>] <wp-env command...>
+//   node tools/wp-env.cjs --matrix=<php>,<db>[,prefix=<p>][,collate=<c>][,port=<n>][,tag=<word>] <wp-env command...>
 //
 // --matrix selects an ADDITIONAL isolated compatibility environment (see tools/matrix.mjs and
 // docs/testing/verification.md): its own generated, gitignored config file, WP_ENV_HOME,
 // compose project, volumes and port. It never touches the development (8870) or test (8880)
 // environments. Images are exact tags only; wp-env's floating `wordpress:php8.x` bases and the
 // unpinned phpMyAdmin service are replaced or dropped, and the database may be MySQL.
+// tag=<word> only names a separate environment for the same combination (benchmarks/run.mjs
+// uses tag=bench), so a benchmark never shares containers or volumes with a matrix run.
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -25,15 +27,16 @@ function parseMatrix(spec) {
   const [php, db, ...extra] = spec.split(',');
   if (!PHP_IMAGES[php]) throw new Error(`--matrix: PHP must be one of ${Object.keys(PHP_IMAGES).join(', ')}`);
   if (!/^(mariadb|mysql):\d+\.\d+\.\d+$/.test(db || '')) throw new Error('--matrix: database must be an exact image tag such as mariadb:10.11.19 or mysql:8.4.13');
-  const options = { php, db, prefix: null, collate: null, port: 8881 };
+  const options = { php, db, prefix: null, collate: null, port: 8881, tag: null };
   for (const item of extra) {
     const [key, value] = item.split('=');
     if (key === 'prefix' && /^[a-z][a-z0-9_]{0,15}_$/.test(value)) options.prefix = value;
     else if (key === 'collate' && /^[a-z0-9_]{1,64}$/.test(value)) options.collate = value;
+    else if (key === 'tag' && /^[a-z]{1,12}$/.test(value)) options.tag = value;
     else if (key === 'port' && /^\d{4,5}$/.test(value) && ![8870, 8880].includes(Number(value))) options.port = Number(value);
     else throw new Error(`--matrix: invalid option ${item}`);
   }
-  const extras = [options.prefix && `p${options.prefix.replace(/_/g, '')}`, options.collate && `c${options.collate.replace(/^utf8mb4_/, '').replace(/_/g, '')}`].filter(Boolean);
+  const extras = [options.prefix && `p${options.prefix.replace(/_/g, '')}`, options.collate && `c${options.collate.replace(/^utf8mb4_/, '').replace(/_/g, '')}`, options.tag].filter(Boolean);
   options.slug = [`php${php.replace('.', '')}`, db.replace(/[:.]/g, ''), ...extras].join('-');
   return options;
 }
