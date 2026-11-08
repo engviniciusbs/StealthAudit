@@ -17,7 +17,9 @@
     "quality": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit composer quality",
     "test:e2e": "node tools/geoip-test-data.mjs && node tests/e2e/run.mjs",
     "benchmark": "node benchmarks/run.mjs",
-    "matrix": "node tools/matrix.mjs"
+    "matrix": "node tools/matrix.mjs",
+    "package": "node tools/package.mjs",
+    "verify-package": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit php tools/verify-package.php"
   },
   "devDependencies": {
     "@wordpress/env": "12.1.0",

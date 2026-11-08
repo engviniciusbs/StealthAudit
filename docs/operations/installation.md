@@ -1,6 +1,6 @@
 # Instalação, configuração segura e atualização
 
-Runbook do operador para um site WordPress single-site. Chave, backup da chave, rotação e reset de fator estão em [panel-security.md](panel-security.md); manutenção, recuperação, desativação e remoção de dados em [maintenance-and-data.md](maintenance-and-data.md); GeoIP em [geoip.md](geoip.md). Não há pacote de produção publicado ainda (fase 8): o procedimento abaixo usa uma cópia do repositório com dependências de produção instaladas.
+Runbook do operador para um site WordPress single-site. Chave, backup da chave, rotação e reset de fator estão em [panel-security.md](panel-security.md); manutenção, recuperação, desativação e remoção de dados em [maintenance-and-data.md](maintenance-and-data.md); GeoIP em [geoip.md](geoip.md). O procedimento usa o ZIP de distribuição gerado por `npm run package` e conferido por `npm run verify-package` ([package.md](../testing/package.md)); nenhum release público foi publicado ainda.
 
 ## Requisitos
 
@@ -11,9 +11,9 @@ Runbook do operador para um site WordPress single-site. Chave, backup da chave, 
 
 ## Instalação como must-use
 
-1. Prepare a árvore fora do servidor: `composer install --no-dev --prefer-dist` na cópia do código (gera `vendor/` de produção). Não envie `tests/`, `tools/`, `docs/`, `node_modules/`, `artifacts/` nem arquivos `.mmdb`.
-2. Envie o núcleo para `wp-content/mu-plugins/stealthaudit/` (com `bootstrap.php`, `src/`, `templates/`, `assets/`, `vendor/`, `LICENSE`, `THIRD-PARTY-NOTICES.md`).
-3. Copie **por último** o loader `loader/stealthaudit.php` para `wp-content/mu-plugins/stealthaudit.php`. O WordPress só carrega arquivos `.php` na raiz de `mu-plugins`; o loader é o interruptor. Enviando-o por último, nenhuma requisição carrega um núcleo incompleto (se carregar, o loader detecta `vendor_missing`/`bootstrap_missing`/`bootstrap_error` e não faz nada).
+1. Confira o SHA-256 do ZIP com o arquivo `.zip.sha256` publicado ao lado (ex.: `sha256sum -c stealthaudit-0.1.0.zip.sha256`; no PowerShell, `Get-FileHash -Algorithm SHA256`). O ZIP já traz `vendor/` de produção prefixado (`StealthAuditVendor\`) e o autoloader pronto: **não** rode Composer no servidor. A lista de arquivos com SHA-256 de cada um está em `.contents.txt`.
+2. Descompacte fora do webroot. O ZIP contém `mu-plugins/stealthaudit.php` (loader) e `mu-plugins/stealthaudit/` (`bootstrap.php`, `src/`, `templates/`, `assets/`, `bin/`, `config/stealthaudit.example.php`, `vendor/`, `LICENSE`, `THIRD-PARTY-NOTICES.md`). Copie o diretório `mu-plugins/stealthaudit/` para `wp-content/mu-plugins/stealthaudit/`.
+3. Copie **por último** o loader `mu-plugins/stealthaudit.php` para `wp-content/mu-plugins/stealthaudit.php` (copie com outro nome e renomeie, para que nenhuma requisição leia um arquivo pela metade). O WordPress só carrega arquivos `.php` na raiz de `mu-plugins`; o loader é o interruptor. Enviando-o por último, nenhuma requisição carrega um núcleo incompleto (se carregar, o loader detecta `vendor_missing`/`bootstrap_missing`/`bootstrap_error` e não faz nada).
 4. Na primeira requisição o esquema é criado (`{prefixo}stealthaudit_events`, `_errors`, `_state`; options `stealthaudit_schema_version` e, durante a criação, `stealthaudit_schema_lease`) e o evento WP-Cron `stealthaudit_maintenance` é agendado. A coleta começa sem nenhuma configuração; o painel continua fechado para todos até a configuração abaixo.
 5. Confira: em **Plugins → Must-Use** aparece "StealthAudit"; o painel em `https://site/stealthaudit/` (permalinks bonitos) ou `https://site/?stealthaudit=panel` (permalinks simples) redireciona ao login e, sem configuração, responde 503 "Painel indisponível".
 
@@ -46,7 +46,7 @@ Configuração malformada não abre nada: o painel volta aos padrões que negam 
 ## Atualização de arquivos e migração
 
 1. Faça backup do banco (tabelas do plugin incluídas) e do arquivo de configuração, conforme [maintenance-and-data.md](maintenance-and-data.md#backups-e-cópias-externas).
-2. Envie a nova versão para um diretório irmão (ex.: `mu-plugins/stealthaudit.new/`) e troque por renomeação: `stealthaudit/` → `stealthaudit.old/`, `stealthaudit.new/` → `stealthaudit/`. Copiar por cima, arquivo a arquivo, deixa requisições com `vendor/` misturado; o loader contém a falha, mas a coleta para durante a cópia.
+2. Confira o SHA-256 do novo ZIP, descompacte fora do webroot e envie `mu-plugins/stealthaudit/` para um diretório irmão (ex.: `mu-plugins/stealthaudit.new/`) e troque por renomeação: `stealthaudit/` → `stealthaudit.old/`, `stealthaudit.new/` → `stealthaudit/`. Copiar por cima, arquivo a arquivo, deixa requisições com `vendor/` misturado; o loader contém a falha, mas a coleta para durante a cópia.
 3. Atualize o loader só se ele mudou, também por renomeação de um arquivo completo.
 4. A migração de esquema roda sozinha na primeira requisição, sob lease de 120 s; enquanto isso, requisições concorrentes não coletam. Verifique o painel e a linha "Manutenção" depois.
 5. Mantenha `stealthaudit.old/` fora de `mu-plugins` (ou apague) depois de validar: um diretório antigo não é carregado, mas guarda código desatualizado no webroot.
