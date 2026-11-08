@@ -2,7 +2,7 @@
 
 Runbooks do operador: [instalação, configuração e atualização](installation.md) · [manutenção, backups, recuperação, desativação e remoção de dados](maintenance-and-data.md) · [GeoIP](geoip.md) · chave e fatores (este documento).
 
-O operador controla PHP, configuração externa e backup do banco. Estes procedimentos são locais e nunca oferecem bypass HTTP. O script `tools/security-operator.php` é ferramenta do repositório de operação, não uma rota de painel. Use uma cópia auditada no ambiente do operador com PHP 8.3+, WordPress e dependências instaladas; não exponha tools no webroot.
+O operador controla PHP, configuração externa e backup do banco. Estes procedimentos são locais e nunca oferecem bypass HTTP. A ferramenta offline vem no pacote em `wp-content/mu-plugins/stealthaudit/bin/security-operator.php` (no repositório, `bin/security-operator.php`) e roda com o PHP 8.3+ do próprio host WordPress e o autoloader prefixado do pacote: Composer não é necessário no servidor. Só funciona em linha de comando (por HTTP sai antes de qualquer ação, sem saída) e recusa agir se o StealthAudit carregado pelo WordPress não for a cópia do mesmo diretório — uma cópia antiga ou avulsa do script não opera sobre uma instalação mais nova. Execute-o como o usuário do PHP do site (o mesmo que lê o arquivo de configuração).
 
 ## Configuração e backup
 
@@ -17,10 +17,10 @@ Antes de operação, pause o painel alterando **a configuração ativa externa**
 Mantenha chave atual e installation_id válidos; a ausência de chave antiga não impede reset controlado desde que uma nova chave válida esteja configurada e os outros fatores tenham plano de recuperação. Pause o painel e execute com o ID numérico do operador, nunca senha/código:
 
 ```text
-STEALTHAUDIT_WORDPRESS_ROOT=/caminho/wordpress php tools/security-operator.php reset 123
+STEALTHAUDIT_WORDPRESS_ROOT=/caminho/wordpress php /caminho/wordpress/wp-content/mu-plugins/stealthaudit/bin/security-operator.php reset 123
 ```
 
-A sintaxe acima é de shell Unix no host PHP; em PowerShell configure `$env:STEALTHAUDIT_WORDPRESS_ROOT` antes de executar `php tools/security-operator.php reset 123`. O caminho não é segredo. O reset substitui fator e recovery por CAS, gera generation aleatória e revoga todas as sessões WordPress desse usuário. Nenhum código/chave é impresso. Repetir o reset do mesmo ID é seguro: gera outra generation e revoga sessões de novo; ID sem fator falha sem alterar nada. Reative o ID autorizado somente depois do reset bem-sucedido. O usuário precisa novo login WordPress, senha reconfirmada e novo cadastro/confirm TOTP antes dos dados.
+A sintaxe acima é de shell Unix no host PHP; em PowerShell configure `$env:STEALTHAUDIT_WORDPRESS_ROOT` antes de executar `php …\wp-content\mu-plugins\stealthaudit\bin\security-operator.php reset 123`. O caminho não é segredo. O reset substitui fator e recovery por CAS, gera generation aleatória e revoga todas as sessões WordPress desse usuário. Nenhum código/chave é impresso. Repetir o reset do mesmo ID é seguro: gera outra generation e revoga sessões de novo; ID sem fator falha sem alterar nada. Reative o ID autorizado somente depois do reset bem-sucedido. O usuário precisa novo login WordPress, senha reconfirmada e novo cadastro/confirm TOTP antes dos dados.
 
 Recovery pelo painel com senha mais código invalida o conjunto inteiro e permite apenas confirmar um novo fator. Abandonar esse recadastro por mais de dez minutos mantém `recovery_locked`; não restaura o fator antigo nem libera novo cadastro com senha apenas. O operador então usa este reset offline. Também se aplica à troca de fator abandonada.
 
@@ -31,10 +31,10 @@ A rotação é offline: não há necessidade de duas chaves simultâneas no aten
 Configure `STEALTHAUDIT_WORDPRESS_ROOT` e `STEALTHAUDIT_NEW_CONFIG_FILE` com os caminhos; valores das chaves permanecem nos arquivos externos protegidos. A configuração ativa ainda usa a chave antiga e allowlist vazia.
 
 ```text
-php tools/security-operator.php rotate 0
-php tools/security-operator.php rotate ULTIMO_ID
-php tools/security-operator.php validate 0
-php tools/security-operator.php validate ULTIMO_ID
+php wp-content/mu-plugins/stealthaudit/bin/security-operator.php rotate 0
+php wp-content/mu-plugins/stealthaudit/bin/security-operator.php rotate ULTIMO_ID
+php wp-content/mu-plugins/stealthaudit/bin/security-operator.php validate 0
+php wp-content/mu-plugins/stealthaudit/bin/security-operator.php validate ULTIMO_ID
 ```
 
 Cada comando lê no máximo 100 fatores por ID e imprime somente quantidade, último ID e se concluiu; `rotate` informa também quantos foram migrados nesse lote (`migrated=0` numa repetição indica que todos já abriam com a nova chave). Substitua ULTIMO_ID pelo `last_user` anterior, repetindo até `complete=yes`. A migração abre o envelope antigo, cifra com a nova chave, compara o plaintext da nova abertura em memória e só então grava por CAS. Geração muda e provas antigas deixam de valer. Reiniciar em zero é seguro: linhas que já abrem com a nova chave são reconhecidas. Uma falha interrompe o lote e mantém o painel pausado; não publique configuração de uma migração parcial.

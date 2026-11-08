@@ -1,7 +1,7 @@
 <?php
 // SPDX-License-Identifier: GPL-3.0-or-later
 $root = dirname( __DIR__ );
-$paths = array( 'src', 'templates', 'loader', 'config', 'tests', 'tools', 'benchmarks' );
+$paths = array( 'src', 'templates', 'loader', 'config', 'tests', 'tools', 'benchmarks', 'bin' );
 $files = array( $root . '/bootstrap.php' );
 foreach ( $paths as $path ) {
 	foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root . '/' . $path ) ) as $file ) {

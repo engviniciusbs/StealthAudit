@@ -1,11 +1,17 @@
 <?php
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Local operator tool. Never packaged as an HTTP endpoint. No secrets in arguments/output.
+// Offline operator tool, shipped in the package as mu-plugins/stealthaudit/bin/. CLI only: over
+// HTTP it exits before doing anything. No secrets in arguments/output. Runs with the PHP of the
+// WordPress host and the package's own prefixed autoloader (loaded by the MU loader); Composer
+// is not needed on that host. It refuses to run against any StealthAudit other than the copy it
+// ships with, so an old or foreign copy of this script cannot act on a newer install.
 if ( 'cli' !== PHP_SAPI ) { exit( 1 ); }
 try {
 	$root = realpath( getenv( 'STEALTHAUDIT_WORDPRESS_ROOT' ) ?: '' );
 	if ( false === $root || ! is_file( $root . '/wp-load.php' ) ) { throw new RuntimeException(); }
 	require $root . '/wp-load.php';
+	$package = realpath( dirname( __DIR__ ) . '/src' );
+	if ( ! defined( 'STEALTHAUDIT_BOOT_STATUS' ) || 'ready' !== STEALTHAUDIT_BOOT_STATUS || false === $package || ! class_exists( StealthAudit\Bootstrap\Runtime::class ) || ! str_starts_with( (string) realpath( (string) ( new ReflectionClass( StealthAudit\Bootstrap\Runtime::class ) )->getFileName() ), $package . DIRECTORY_SEPARATOR ) ) { throw new RuntimeException(); }
 	$runtime = StealthAudit\Bootstrap\Runtime::boot();
 	$config = $runtime->configuration;
 	if ( ! $runtime->configuration_valid || array() !== $config->authorized_user_ids ) { throw new RuntimeException(); }
