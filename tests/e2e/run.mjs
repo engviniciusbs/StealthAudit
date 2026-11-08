@@ -343,7 +343,11 @@ try {
   await step('No wp-admin menu or admin-bar entry for StealthAudit (only the Must-Use list)', async () => {
     const admin = await opCtx.newPage();
     await admin.goto(`${BASE}/wp-admin/`);
-    const found = await admin.evaluate(() => ({ menu: [...document.querySelectorAll('#adminmenu a, #wpadminbar a')].filter((a) => /stealth/i.test(a.href + a.textContent)).length, links: document.querySelectorAll('#adminmenu a').length }));
+    const found = await admin.evaluate(() => {
+      // The site title node is WordPress's own (a fresh wp-env site is titled after the directory, "StealthAudit").
+      const hits = [...document.querySelectorAll('#adminmenu a, #wpadminbar a')].filter((a) => !a.closest('#wp-admin-bar-site-name') && /stealth/i.test(a.href + a.textContent));
+      return { menu: hits.length, links: document.querySelectorAll('#adminmenu a').length, hits: hits.map((a) => `${a.closest('[id]')?.id}: ${a.textContent.trim().slice(0, 40)} ${a.getAttribute('href')}`) };
+    });
     check(found.links > 10 && found.menu === 0, `menu entries ${JSON.stringify(found)}`);
     await admin.goto(`${BASE}/wp-admin/plugins.php?plugin_status=mustuse`);
     const mu = await admin.locator('#the-list').textContent();
