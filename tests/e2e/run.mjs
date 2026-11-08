@@ -26,6 +26,10 @@ const BASE = 'https://localhost:8443';
 // by default this is the wp-env test environment on 8880.
 const ENV_PREFIX = process.env.STEALTHAUDIT_E2E_ENV || 'wp-env-stealthaudit-tests';
 const HTTP_PORT = Number(process.env.STEALTHAUDIT_E2E_HTTP_PORT || 8880);
+// Where the repository (fixture + artifacts/) is visible inside the CLI container. The packaged-ZIP
+// site (tests/package/run.mjs) does not map the repository into WordPress; it mounts it at
+// /opt/stealthaudit-dev, outside the webroot, and the plugin under test is the installed ZIP.
+const WORKDIR = process.env.STEALTHAUDIT_E2E_WORKDIR || '/var/www/html/wp-content/mu-plugins/stealthaudit';
 const WIDTHS = [320, 375, 768, 1280, 1920];
 const results = [];
 let last = 0;
@@ -44,7 +48,8 @@ function container() {
 }
 const CLI = container();
 function wp(...args) {
-  return execFileSync('docker', ['exec', '-w', '/var/www/html/wp-content/mu-plugins/stealthaudit', CLI, 'wp', ...args], { env: { ...process.env, MSYS_NO_PATHCONV: '1' } }).toString().trim();
+  if (!/^\/[A-Za-z0-9/_.-]+$/.test(WORKDIR)) throw new Error(`invalid STEALTHAUDIT_E2E_WORKDIR ${WORKDIR}`);
+  return execFileSync('docker', ['exec', '-w', WORKDIR, CLI, 'wp', '--path=/var/www/html', ...args], { env: { ...process.env, MSYS_NO_PATHCONV: '1' } }).toString().trim();
 }
 function fixture(action, input) {
   return wp('eval-file', 'tests/e2e/fixture.php', action, ...(input ? [JSON.stringify(input)] : []));

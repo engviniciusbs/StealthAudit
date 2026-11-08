@@ -19,7 +19,8 @@
     "benchmark": "node benchmarks/run.mjs",
     "matrix": "node tools/matrix.mjs",
     "package": "node tools/package.mjs",
-    "verify-package": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit php tools/verify-package.php"
+    "verify-package": "node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit php tools/verify-package.php",
+    "test:package": "node tests/package/run.mjs"
   },
   "devDependencies": {
     "@wordpress/env": "12.1.0",

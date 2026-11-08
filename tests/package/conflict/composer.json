@@ -1,0 +1,16 @@
+{
+  "name": "stealthaudit-tests/conflict-fixture",
+  "description": "Test fixture only: another plugin bundling OTHER versions of StealthAudit's libraries, unprefixed.",
+  "type": "project",
+  "license": "GPL-3.0-or-later",
+  "require": {
+    "bacon/bacon-qr-code": "2.0.8",
+    "spomky-labs/otphp": "11.4.4",
+    "paragonie/constant_time_encoding": "2.7.0",
+    "geoip2/geoip2": "2.13.0",
+    "maxmind-db/reader": "1.11.1",
+    "symfony/deprecation-contracts": "3.5.1",
+    "psr/clock": "1.0.0"
+  },
+  "config": { "platform": { "php": "8.3.0" }, "sort-packages": true }
+}
