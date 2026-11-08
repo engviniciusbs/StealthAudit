@@ -271,6 +271,9 @@
 		image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent( svg );
 		box.replaceChildren( image );
 		box.hidden = false;
+		root.querySelectorAll( '[data-sa-redisplay]' ).forEach( function ( node ) {
+			node.hidden = true;
+		} );
 		return true;
 	}
 
@@ -294,7 +297,7 @@
 			show( 'session' );
 			return;
 		}
-		if ( 'enrollment/begin' === action && 'denied' === result.kind ) {
+		if ( ( 'enrollment/begin' === action || 'redisplay' === action ) && 'denied' === result.kind ) {
 			formStatus( form, text( 'qr_failed' ) );
 			return;
 		}
@@ -322,7 +325,11 @@
 			return;
 		}
 		busy( form, true );
-		call( 'POST', action, fields.body ).then( function ( result ) {
+		/* Redisplay: reconfirm the password (allowed while enrollment is pending), then fetch the same pending QR. */
+		var request = 'redisplay' === action ? call( 'POST', 'reconfirm', fields.body ).then( function ( first ) {
+			return 'ok' === first.kind ? call( 'POST', 'enrollment/begin', {} ) : first;
+		} ) : call( 'POST', action, fields.body );
+		request.then( function ( result ) {
 			wipeSecrets( form );
 			busy( form, false );
 			if ( 'ok' !== result.kind ) {
@@ -330,7 +337,7 @@
 				return;
 			}
 			var data = result.data;
-			if ( 'enrollment/begin' === action || 'recover' === action || 'replace-factor' === action ) {
+			if ( 'redisplay' === action || 'enrollment/begin' === action || 'recover' === action || 'replace-factor' === action ) {
 				if ( ! showQr( data.qr ) ) {
 					formStatus( form, text( 'qr_failed' ) );
 					return;
@@ -349,15 +356,28 @@
 				}
 				return;
 			}
-			if ( 'revoke' === action ) {
-				announce( text( 'signed_out' ) );
-			}
 			reloadPanel();
 		} );
 	}
 
 	document.querySelectorAll( 'form[data-sa-action]' ).forEach( function ( form ) {
 		form.addEventListener( 'submit', submit );
+	} );
+	/* Never keep the QR, recovery codes or records in the back/forward cache. */
+	window.addEventListener( 'pagehide', function () {
+		[ '[data-sa-qr]', '[data-sa-codes]', '[data-sa-rows]' ].forEach( function ( selector ) {
+			root.querySelectorAll( selector ).forEach( function ( node ) {
+				node.replaceChildren();
+			} );
+		} );
+		root.querySelectorAll( 'input[type="password"], input[name="code"], input[name="recovery_code"]' ).forEach( function ( input ) {
+			input.value = '';
+		} );
+	} );
+	window.addEventListener( 'pageshow', function ( event ) {
+		if ( event.persisted ) {
+			reloadPanel();
+		}
 	} );
 	document.querySelectorAll( 'fieldset[data-sa-js]' ).forEach( function ( fieldset ) {
 		fieldset.disabled = false;

@@ -492,6 +492,62 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		}
 	}
 
+	public function test_lost_replacement_qr_is_redisplayed_after_reconfirming_password(): void {
+		$this->enroll();
+		$this->now += 30;
+		self::assertSame( 'enrollment_pending', $this->call( 'POST', '/replace-factor', array(), array( 'password' => self::PASSWORD, 'code' => $this->code() ) )->get_data()['status'] );
+		// The operator reloads after the password window (5 min) but inside the pending window (10 min).
+		$this->now += 301;
+		$page = $this->panel()->respond( 'GET', array() );
+		$this->assert_page( $page, 'enrollment_pending', array( 'setup' ) );
+		self::assertMatchesRegularExpression( '/<div data-sa-redisplay>.*data-sa-action="redisplay".*name="password".*<\/div>/s', $page->body );
+		self::assertStringContainsString( 'Não recarregue nem saia desta página antes de confirmar.', $page->body );
+		// Without the password the QR stays closed; reconfirm keeps the pending factor and reopens it.
+		$this->assert_denied( $this->call( 'POST', '/enrollment/begin', array(), array() ), 403, 'stealthaudit_forbidden' );
+		self::assertSame( 'enrollment_pending', $this->call( 'POST', '/reconfirm', array(), array( 'password' => self::PASSWORD ) )->get_data()['status'] );
+		$again = $this->call( 'POST', '/enrollment/begin', array(), array() );
+		self::assertSame( 200, $again->get_status() );
+		self::assertStringContainsString( '<svg', $again->get_data()['qr'] );
+		$this->now += 30;
+		$confirmed = $this->call( 'POST', '/enrollment/confirm', array(), array( 'code' => $this->code() ) )->get_data();
+		self::assertSame( 'authorized', $confirmed['status'] );
+		self::assertCount( 10, $confirmed['recovery_codes'] );
+		self::assertSame( 200, $this->call( 'GET', '/events' )->get_status() );
+		$this->assert_private_headers();
+	}
+
+	public function test_unknown_status_renders_a_neutral_closed_screen(): void {
+		$view = array(
+			'status'     => 'something_new',
+			'panel'      => $this->urls->panel(),
+			'rest'       => $this->urls->rest(),
+			'nonce'      => 'n',
+			'rest_nonce' => 'r',
+			'login'      => wp_login_url(),
+			'query'      => array(),
+			'view'       => 'audit',
+			'filters'    => array(),
+			'cursor'     => null,
+			'invalid'    => false,
+			'tabs'       => array( 'audit' => $this->urls->panel(), 'errors' => $this->urls->panel() ),
+			'action'     => home_url( '/' ),
+			'hidden'     => array(),
+			'assets'     => array_combine( array_keys( Assets::FILES ), array_map( array( $this->urls, 'asset' ), array_keys( Assets::FILES ) ) ),
+			'site'       => 'site',
+			'host'       => 'host',
+		);
+		ob_start();
+		( static function ( string $stealthaudit_template, array $stealthaudit_view ): void {
+			require $stealthaudit_template;
+		} )( dirname( __DIR__, 2 ) . '/templates/panel.php', $view );
+		$body = (string) ob_get_clean();
+		self::assertStringContainsString( 'data-status="unknown"', $body );
+		self::assertStringContainsString( 'Estado desconhecido', $body );
+		self::assertStringNotContainsString( 'Recuperação bloqueada', $body );
+		self::assertStringNotContainsString( 'data-sa-action', $body );
+		self::assertStringNotContainsString( 'data-sa-records', $body );
+	}
+
 	public function test_assets_are_local_private_and_only_for_the_operator(): void {
 		$directory = dirname( __DIR__, 2 ) . '/assets';
 		$assets = new Assets( $this->config, $directory );

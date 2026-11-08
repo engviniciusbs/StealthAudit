@@ -115,6 +115,8 @@ foreach ( $states as $name => $overrides ) {
 		// Placeholder pattern, not a QR code and not derived from any secret.
 		$placeholder = rawurlencode( '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#fff"/><path d="M1 1h2v2H1zM5 1h2v2H5zM1 5h2v2H1zM4 4h1v1H4z"/></svg>' );
 		$html        = str_replace( '<div class="qr" data-sa-qr hidden></div>', '<div class="qr" data-sa-qr><img src="data:image/svg+xml,' . $placeholder . '" width="256" height="256" alt="Placeholder do QR (fixture, sem segredo)"></div>', $html );
+		// As after a successful (re)display: the password form is hidden while a QR is shown.
+		$html = str_replace( '<div data-sa-redisplay>', '<div data-sa-redisplay hidden>', $html );
 	}
 	file_put_contents( $out . '/' . $name . '.html', $html );
 }

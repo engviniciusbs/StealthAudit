@@ -19,7 +19,8 @@ $stealthaudit_current = $stealthaudit_view['view'];
 $stealthaudit_filters = $stealthaudit_view['filters'];
 $stealthaudit_known   = array( 'password_required', 'enrollment_required', 'enrollment_pending', 'challenge_required', 'authorized', 'recovery_locked' );
 if ( ! in_array( $stealthaudit_status, $stealthaudit_known, true ) ) {
-	$stealthaudit_status = 'recovery_locked';
+	// Fail closed on a status this template does not know: no forms, no data.
+	$stealthaudit_status = 'unknown';
 }
 $stealthaudit_authorized = 'authorized' === $stealthaudit_status;
 
@@ -78,11 +79,10 @@ $stealthaudit_messages = array(
 	'network'          => __( 'Sem resposta do servidor. Confira a conexão e tente de novo.', 'stealthaudit' ),
 	'stale'            => __( 'A página ficou desatualizada. Recarregue para continuar.', 'stealthaudit' ),
 	'qr_alt'           => __( 'Código QR do cadastro no aplicativo autenticador', 'stealthaudit' ),
-	'qr_failed'        => __( 'Não foi possível exibir o QR. A senha confirmada vale por cinco minutos: recarregue a página, confirme a senha e tente de novo.', 'stealthaudit' ),
+	'qr_failed'        => __( 'Não foi possível exibir o QR. Confira a senha do WordPress e tente de novo; se o cadastro pendente já expirou, recarregue a página.', 'stealthaudit' ),
 	'qr_ready'         => __( 'Código QR exibido. Escaneie e informe o código gerado.', 'stealthaudit' ),
 	'codes_ready'      => __( 'Cadastro confirmado. Guarde os códigos de recuperação.', 'stealthaudit' ),
 	'expired_heading'  => __( 'A verificação expirou', 'stealthaudit' ),
-	'signed_out'       => __( 'Verificação do StealthAudit encerrada.', 'stealthaudit' ),
 	'loading'          => __( 'Carregando registros…', 'stealthaudit' ),
 	/* translators: %d: number of rows on this page. */
 	'loaded'           => __( 'Registros carregados: %d.', 'stealthaudit' ),
@@ -225,7 +225,6 @@ $stealthaudit_screen = static function ( string $screen, string $heading, bool $
 	data-view="<?php echo esc_attr( $stealthaudit_current ); ?>"
 	data-rest="<?php echo esc_url( $stealthaudit_view['rest'] ); ?>"
 	data-panel="<?php echo esc_url( $stealthaudit_view['panel'] ); ?>"
-	data-login="<?php echo esc_url( $stealthaudit_view['login'] ); ?>"
 	data-nonce="<?php echo esc_attr( $stealthaudit_view['nonce'] ); ?>"
 	data-rest-nonce="<?php echo esc_attr( $stealthaudit_view['rest_nonce'] ); ?>"
 	data-filters="<?php echo esc_attr( (string) wp_json_encode( (object) $stealthaudit_filters ) ); ?>"
@@ -258,9 +257,14 @@ $stealthaudit_screen = static function ( string $screen, string $heading, bool $
 	<?php if ( in_array( $stealthaudit_status, array( 'enrollment_required', 'enrollment_pending', 'challenge_required', 'authorized' ), true ) ) : ?>
 		<?php $stealthaudit_screen( 'setup', __( 'Confirme o cadastro', 'stealthaudit' ), 'enrollment_pending' === $stealthaudit_status ); ?>
 		<p><?php esc_html_e( 'Escaneie o código QR no aplicativo autenticador e digite o código de 6 dígitos que ele mostrar. O cadastro pendente expira em dez minutos; até a confirmação, o código anterior não abre o painel.', 'stealthaudit' ); ?></p>
+		<p class="lead-in"><strong><?php esc_html_e( 'Não recarregue nem saia desta página antes de confirmar.', 'stealthaudit' ); ?></strong> <?php esc_html_e( 'O QR some ao sair; para exibi-lo de novo é preciso confirmar a senha do WordPress.', 'stealthaudit' ); ?></p>
 		<div class="qr" data-sa-qr hidden></div>
-		<?php $stealthaudit_open( 'enrollment/begin', __( 'Exibir o código QR', 'stealthaudit' ) ); ?>
-		<?php $stealthaudit_close( __( 'Exibir o código QR', 'stealthaudit' ), false ); ?>
+		<div data-sa-redisplay>
+			<p><?php esc_html_e( 'O QR deste cadastro não está na tela. Confirme a senha do WordPress para exibi-lo de novo; o cadastro pendente continua o mesmo.', 'stealthaudit' ); ?></p>
+			<?php $stealthaudit_open( 'redisplay', __( 'Exibir o código QR', 'stealthaudit' ) ); ?>
+				<?php $stealthaudit_field( 'sa-redisplay-password', 'password', __( 'Senha do WordPress', 'stealthaudit' ), 'password' ); ?>
+			<?php $stealthaudit_close( __( 'Exibir o código QR', 'stealthaudit' ), false ); ?>
+		</div>
 		<?php $stealthaudit_open( 'enrollment/confirm', __( 'Confirmar cadastro', 'stealthaudit' ) ); ?>
 			<?php $stealthaudit_field( 'sa-setup-code', 'code', __( 'Código do autenticador', 'stealthaudit' ), 'code', __( '6 dígitos; pode colar com espaços.', 'stealthaudit' ) ); ?>
 		<?php $stealthaudit_close( __( 'Confirmar cadastro', 'stealthaudit' ) ); ?>
@@ -304,6 +308,12 @@ $stealthaudit_screen = static function ( string $screen, string $heading, bool $
 		<?php $stealthaudit_screen( 'locked', __( 'Recuperação bloqueada', 'stealthaudit' ), true ); ?>
 		<p><?php esc_html_e( 'A troca do autenticador não foi concluída a tempo. Por segurança, esta conta não pode reabrir o cadastro só com senha e sessão.', 'stealthaudit' ); ?></p>
 		<p><?php esc_html_e( 'Peça ao operador do servidor o reset offline do fator, descrito no runbook de segurança do painel. Depois, recarregue esta página para cadastrar o novo autenticador.', 'stealthaudit' ); ?></p>
+	</section>
+	<?php endif; ?>
+
+	<?php if ( 'unknown' === $stealthaudit_status ) : ?>
+		<?php $stealthaudit_screen( 'unknown', __( 'Estado desconhecido', 'stealthaudit' ), true ); ?>
+		<p><?php esc_html_e( 'Não foi possível determinar o estado do acesso ao StealthAudit, então nada foi liberado. Recarregue a página; se continuar, fale com o operador do servidor.', 'stealthaudit' ); ?></p>
 	</section>
 	<?php endif; ?>
 
