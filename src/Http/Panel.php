@@ -172,6 +172,7 @@ final class Panel {
 			'assets'     => $assets,
 			'site'       => (string) get_bloginfo( 'name' ),
 			'host'       => (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ),
+			'geoip'      => null !== $this->configuration->mmdb_path,
 		);
 		ob_start();
 		try {

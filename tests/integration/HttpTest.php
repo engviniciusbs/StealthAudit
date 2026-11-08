@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use StealthAudit\Audit\Context;
 use StealthAudit\Config\Configuration;
+use StealthAudit\Geo\Geolocation;
 use StealthAudit\Http\Api;
 use StealthAudit\Http\Assets;
 use StealthAudit\Http\Guard;
@@ -345,6 +346,96 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		}
 	}
 
+	public function test_location_is_estimated_at_read_time_and_never_stored(): void {
+		$source = dirname( __DIR__, 2 ) . '/artifacts/geoip/GeoIP2-City-Test.mmdb';
+		self::assertFileExists( $source, 'Run node tools/geoip-test-data.mjs (the npm test scripts do it).' );
+		$dir = sys_get_temp_dir() . '/sa-http-geo-' . bin2hex( random_bytes( 6 ) );
+		self::assertTrue( mkdir( $dir, 0700 ) );
+		$path = $dir . '/City.mmdb';
+		self::assertTrue( copy( $source, $path ) );
+		$http = 0;
+		$count = static function ( mixed $pre ) use ( &$http ): mixed {
+			++$http;
+			return $pre;
+		};
+		add_filter( 'pre_http_request', $count );
+		try {
+			$this->enroll();
+			$london = $this->event( $this->now - 30, array( 'ip' => '81.2.69.160' ) );
+			$japan = $this->event( $this->now - 20, array( 'ip' => '2001:218::' ) );
+			$private = $this->event( $this->now - 10, array( 'ip' => '127.0.0.1' ) );
+			$none = $this->event( $this->now - 5, array( 'ip' => null ) );
+			$this->storage->errors->append( array( 'severity' => 'warning', 'message' => 'geo check', 'file' => 'wp-content/plugins/demo/a.php', 'line' => 1 ), $this->now );
+			// Without an MMDB the API shape is unchanged: no location fields at all.
+			$plain = $this->call( 'GET', '/events' )->get_data();
+			self::assertArrayNotHasKey( 'geolocation', $plain );
+			self::assertArrayNotHasKey( 'location', $plain['items'][0] );
+
+			$this->geo_api( $path, 3650 );
+			$data = $this->call( 'GET', '/events' )->get_data();
+			self::assertSame( array( 'state' => 'available', 'basis' => 'current_database' ), array_slice( $data['geolocation'], 0, 2 ) );
+			self::assertMatchesRegularExpression( '/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', $data['geolocation']['database_built'] );
+			$by_id = array_column( $data['items'], null, 'id' );
+			self::assertSame( array( 'status' => 'estimate', 'country_code' => 'GB', 'country' => 'Reino Unido', 'region' => 'Inglaterra', 'city' => 'Londres' ), $by_id[ $london ]['location'] );
+			self::assertSame( '81.2.69.160', $by_id[ $london ]['ip'] );
+			self::assertSame( array( 'status' => 'estimate', 'country_code' => 'JP', 'country' => 'Japão', 'region' => null, 'city' => null ), $by_id[ $japan ]['location'] );
+			$unavailable = array( 'status' => 'unavailable', 'country_code' => null, 'country' => null, 'region' => null, 'city' => null );
+			self::assertSame( $unavailable, $by_id[ $private ]['location'] );
+			self::assertSame( $unavailable, $by_id[ $none ]['location'] );
+			$errors = $this->call( 'GET', '/errors' )->get_data();
+			self::assertArrayNotHasKey( 'geolocation', $errors );
+			self::assertArrayNotHasKey( 'location', $errors['items'][0] );
+
+			// Absent, corrupt or outdated database: the query still succeeds and IPs stay visible.
+			file_put_contents( $dir . '/corrupt.mmdb', random_bytes( 2048 ) );
+			$cases = array(
+				'missing'  => array( $dir . '/absent.mmdb', 3650, null ),
+				'invalid'  => array( $dir . '/corrupt.mmdb', 3650, null ),
+				'outdated' => array( $path, 1, $this->now + 400 * DAY_IN_SECONDS ),
+			);
+			foreach ( $cases as $state => $case ) {
+				$this->geo_api( $case[0], $case[1], $case[2] );
+				$response = $this->call( 'GET', '/events' );
+				self::assertSame( 200, $response->get_status(), $state );
+				$failed = $response->get_data();
+				self::assertSame( $state, $failed['geolocation']['state'] );
+				self::assertSame( '81.2.69.160', array_column( $failed['items'], null, 'id' )[ $london ]['ip'] );
+				self::assertSame( array( 'unavailable' ), array_values( array_unique( array_column( array_column( $failed['items'], 'location' ), 'status' ) ) ), $state );
+			}
+
+			// Nothing about location reaches the plugin tables or the options tables.
+			global $wpdb;
+			foreach ( array( $this->db->table( 'events' ), $this->db->table( 'errors' ), $this->db->table( 'state' ), $this->connection->options, $wpdb->options ) as $table ) {
+				foreach ( $this->db->rows( 'SELECT * FROM %i', $table ) as $row ) {
+					$text = implode( ' ', array_map( 'strval', $row ) );
+					foreach ( array( 'Londres', 'Reino Unido', 'Japão', 'Jap\u00e3o', 'current_database' ) as $needle ) {
+						self::assertStringNotContainsString( $needle, $text, $table );
+					}
+				}
+			}
+			self::assertSame( 0, $http, 'GeoIP made an HTTP request.' );
+
+			// The page has the location column only when an MMDB is configured, and only for audit.
+			$page = $this->panel()->respond( 'GET', array() )->body;
+			self::assertStringNotContainsString( 'data-geoip', $page );
+			self::assertStringNotContainsString( 'Local estimado', $page );
+			$configured = Configuration::from_array( array( 'authorized_user_ids' => array( $this->user ), 'endpoint' => '/sa-http-panel', 'key_base64' => base64_encode( str_repeat( 'k', 32 ) ), 'key_id' => 'synthetic-test-key', 'installation_id' => 'synthetic-test-installation', 'mmdb_path' => $path ) );
+			$geo_panel = new Panel( $configured, $this->urls, fn (): PanelAccess => $this->panel_access(), dirname( __DIR__, 2 ) . '/templates/panel.php' );
+			$page = $geo_panel->respond( 'GET', array() )->body;
+			self::assertStringContainsString( ' data-geoip>', $page );
+			self::assertStringContainsString( '<th scope="col" data-sa-geoip>Local estimado (base atual)</th>', $page );
+			self::assertStringContainsString( 'n\u00e3o o local do IP no momento do evento', $page );
+			self::assertStringContainsString( '"geo_none":"indispon\u00edvel"', $page );
+			self::assertStringNotContainsString( 'data-sa-geoip', $geo_panel->respond( 'GET', array( 'view' => 'errors' ) )->body );
+		} finally {
+			remove_filter( 'pre_http_request', $count );
+			foreach ( glob( $dir . '/*' ) ?: array() as $file ) {
+				unlink( $file );
+			}
+			rmdir( $dir );
+		}
+	}
+
 	public function test_log_text_with_markup_is_returned_inert(): void {
 		$this->enroll();
 		$payload = '<script>alert(1)</script><img src=x onerror="alert(2)">&\'';
@@ -625,6 +716,7 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 			'assets'     => array_combine( array_keys( Assets::FILES ), array_map( array( $this->urls, 'asset' ), array_keys( Assets::FILES ) ) ),
 			'site'       => 'site',
 			'host'       => 'host',
+			'geoip'      => false,
 		);
 		ob_start();
 		( static function ( string $stealthaudit_template, array $stealthaudit_view ): void {
@@ -757,6 +849,13 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 			return ( $this->access )();
 		}
 		return new PanelAccess( $this->config, $this->storage->state, $this->cipher, new TotpProvider(), new WordPressSession(), new Context(), fn (): int => $this->now );
+	}
+
+	/** Replace the routes with an Api that resolves locations from the given MMDB. */
+	private function geo_api( string $path, int $days, ?int $now = null ): void {
+		$clock = fn (): int => $now ?? $this->now;
+		$api = new Api( new Guard( $this->config, fn (): PanelAccess => $this->panel_access(), $this->urls ), fn (): Storage => $this->storage, static fn (): array => array( 'status' => 'available', 'dropped' => 0, 'buffered' => 0 ), $this->config, fn (): int => $this->now, new Geolocation( $path, $days, ABSPATH, $clock ) );
+		$api->register_routes( true );
 	}
 
 	private function panel( ?Closure $access = null ): Panel {

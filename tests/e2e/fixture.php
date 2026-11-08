@@ -8,7 +8,9 @@
  *
  * setup     Snapshot wp-config.php, .htaccess, options, users, StealthAudit tables; create
  *           synthetic users, a random key and a temporary STEALTHAUDIT_CONFIG block.
- * config    Rewrite the temporary block (home URL, endpoint, key present or missing).
+ * config    Rewrite the temporary block (home URL, endpoint, key present or missing, MMDB path).
+ * geoip     Copy MaxMind's official City test MMDB outside the webroot and add events with known
+ *           test IPs ("on"), or delete the copy ("off"). Never a real GeoLite/GeoIP database.
  * age-proof Move the idle clock of every proof created by this run past 1,800 s.
  * inject    Store an HTML/script payload as a diagnostic (real repository) and as a raw event row.
  * theme     Switch to a bundled theme (or "restore").
@@ -38,6 +40,8 @@ $e2e_marker   = array( '/* stealthaudit-e2e:begin */', '/* stealthaudit-e2e:end 
 $e2e_action   = $args[0] ?? '';
 $e2e_input    = isset( $args[1] ) ? json_decode( $args[1], true ) : array();
 $e2e_table    = static fn ( string $kind ): string => $wpdb->prefix . 'stealthaudit_' . $kind;
+// Shared by the CLI and web containers and outside the webroot, as the plugin requires.
+$e2e_geo      = rtrim( (string) getenv( 'HOME' ), '/' ) . '/stealthaudit-e2e-geoip';
 
 $e2e_read = static function ( string $path ): array {
 	$data = is_readable( $path ) ? json_decode( (string) file_get_contents( $path ), true ) : null;
@@ -65,7 +69,8 @@ $e2e_configure = static function ( array $snapshot, array $state, array $variant
 		'installation_id'     => $state['installation_id'],
 		'trusted_proxies'     => array(),
 		'limits'              => array(),
-		'mmdb_path'           => null,
+		'mmdb_path'           => $variant['mmdb'] ?? null,
+		'mmdb_max_age_days'   => 3650,
 	);
 	$count    = 0;
 	$updated  = preg_replace(
@@ -161,6 +166,49 @@ switch ( $e2e_action ) {
 	case 'config':
 		$e2e_configure( $e2e_read( $e2e_snapshot ), $e2e_read( $e2e_state ), is_array( $e2e_input ) ? $e2e_input : array() );
 		WP_CLI::success( 'Config block rewritten.' );
+		break;
+
+	case 'geoip':
+		$file = $e2e_geo . '/GeoIP2-City-Test.mmdb';
+		if ( 'on' !== ( $e2e_input['state'] ?? '' ) ) {
+			if ( is_file( $file ) ) {
+				unlink( $file );
+			}
+			if ( is_dir( $e2e_geo ) ) {
+				rmdir( $e2e_geo );
+			}
+			WP_CLI::success( 'GeoIP test copy removed.' );
+			break;
+		}
+		$source = dirname( __DIR__, 2 ) . '/artifacts/geoip/GeoIP2-City-Test.mmdb';
+		$root   = realpath( ABSPATH );
+		if ( ! is_file( $source ) || '/stealthaudit-e2e-geoip' === $e2e_geo || false === $root || str_starts_with( $e2e_geo, $root . '/' ) ) {
+			WP_CLI::error( 'GeoIP test data missing (node tools/geoip-test-data.mjs) or no safe directory outside the webroot.' );
+		}
+		if ( ! is_dir( $e2e_geo ) && ! mkdir( $e2e_geo, 0700 ) ) {
+			WP_CLI::error( 'Cannot create the GeoIP test directory.' );
+		}
+		if ( ! copy( $source, $file ) ) {
+			WP_CLI::error( 'Cannot copy the GeoIP test database.' );
+		}
+		$events = \StealthAudit\Bootstrap\Runtime::boot()->storage()->events;
+		foreach ( array( '81.2.69.160', '2001:218::' ) as $ip ) {
+			$events->append(
+				array(
+					'actor_id'    => null,
+					'category'    => 'access',
+					'action'      => 'login_failed',
+					'result'      => 'failure',
+					'origin'      => 'http',
+					'object_type' => 'user',
+					'object_id'   => null,
+					'ip'          => $ip,
+				),
+				time()
+			);
+		}
+		echo wp_json_encode( array( 'path' => $file ) ) . "
+";
 		break;
 
 	case 'permalinks':
@@ -307,6 +355,12 @@ switch ( $e2e_action ) {
 		if ( is_link( ABSPATH . 'blog' ) ) {
 			unlink( ABSPATH . 'blog' );
 		}
+		if ( is_file( $e2e_geo . '/GeoIP2-City-Test.mmdb' ) ) {
+			unlink( $e2e_geo . '/GeoIP2-City-Test.mmdb' );
+		}
+		if ( is_dir( $e2e_geo ) ) {
+			rmdir( $e2e_geo );
+		}
 		file_put_contents( $e2e_config, base64_decode( $snapshot['wp_config'], true ) );
 		if ( null !== $snapshot['htaccess'] ) {
 			file_put_contents( ABSPATH . '.htaccess', base64_decode( $snapshot['htaccess'], true ) );
@@ -348,6 +402,7 @@ switch ( $e2e_action ) {
 			'state'    => $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i ORDER BY state_key', $e2e_table( 'state' ) ), ARRAY_A ) != $snapshot['state'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery, Universal.Operators.StrictComparisons
 			'records'  => (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'events' ) ) ) > $snapshot['events'] || (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'errors' ) ) ) > $snapshot['errors'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			'symlink'  => file_exists( ABSPATH . 'blog' ),
+			'geoip'    => file_exists( $e2e_geo ),
 		);
 		if ( in_array( true, $left, true ) ) {
 			WP_CLI::error( 'Restore incomplete: ' . implode( ', ', array_keys( array_filter( $left ) ) ) . '; snapshot kept in artifacts/e2e.' );

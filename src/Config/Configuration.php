@@ -14,6 +14,9 @@ use InvalidArgumentException;
 
 /** Validated immutable operator settings; debug output is redacted. */
 final readonly class Configuration {
+	/** Default GeoIP age policy: a database built longer ago than this is not used. */
+	public const DEFAULT_MMDB_MAX_AGE_DAYS = 30;
+
 	public const DEFAULT_LIMITS = array(
 		'event_rows'         => 100000,
 		'event_bytes'        => 134217728,
@@ -38,6 +41,7 @@ final readonly class Configuration {
 	 * @param array<string,int> $limits Resource budgets.
 	 * @param string|null       $mmdb_path Optional local database path.
 	 * @param string            $installation_id Stable operator-owned cipher context.
+	 * @param int               $mmdb_max_age_days Oldest accepted database build, in days.
 	 */
 	private function __construct(
 		public array $authorized_user_ids,
@@ -48,6 +52,7 @@ final readonly class Configuration {
 		public array $limits,
 		public ?string $mmdb_path,
 		public string $installation_id,
+		public int $mmdb_max_age_days,
 	) {}
 
 	/**
@@ -101,11 +106,15 @@ final readonly class Configuration {
 		if ( null !== $mmdb && ( ! is_string( $mmdb ) || ! str_starts_with( $mmdb, '/' ) || str_contains( $mmdb, "\0" ) ) ) {
 			throw new InvalidArgumentException( 'Invalid MMDB path.' );
 		}
+		$max_age = $values['mmdb_max_age_days'] ?? self::DEFAULT_MMDB_MAX_AGE_DAYS;
+		if ( ! is_int( $max_age ) || $max_age < 1 || $max_age > 3650 ) {
+			throw new InvalidArgumentException( 'Invalid MMDB age policy.' );
+		}
 		$installation = $values['installation_id'] ?? '';
 		if ( ! is_string( $installation ) || ! preg_match( '/^[a-zA-Z0-9_-]{0,128}$/D', $installation ) ) {
 			throw new InvalidArgumentException( 'Invalid installation identity.' );
 		}
-		return new self( array_values( array_unique( $ids ) ), $endpoint, $key, $key_id, $proxies, array_replace( self::DEFAULT_LIMITS, $overrides ), $mmdb, $installation );
+		return new self( array_values( array_unique( $ids ) ), $endpoint, $key, $key_id, $proxies, array_replace( self::DEFAULT_LIMITS, $overrides ), $mmdb, $installation, $max_age );
 	}
 
 	/**

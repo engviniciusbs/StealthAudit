@@ -29,6 +29,9 @@ final class ConfigurationTest extends TestCase {
 		self::assertTrue( $config->has_key() );
 		self::assertSame( 2, $config->limits['events_per_request'] );
 		self::assertSame( 100000, $config->limits['event_rows'] );
+		self::assertNull( $config->mmdb_path );
+		self::assertSame( Configuration::DEFAULT_MMDB_MAX_AGE_DAYS, $config->mmdb_max_age_days );
+		self::assertSame( 7, Configuration::from_array( array( 'mmdb_path' => '/srv/geo/City.mmdb', 'mmdb_max_age_days' => 7 ) )->mmdb_max_age_days );
 	}
 
 	/** @dataProvider invalid_configuration */
@@ -51,6 +54,9 @@ final class ConfigurationTest extends TestCase {
 			array( array( 'limits' => array( 'events_per_request' => 0 ) ) ),
 			array( array( 'limits' => array( 'unknown' => 1 ) ) ),
 			array( array( 'mmdb_path' => 'https://remote.example/db' ) ),
+			array( array( 'mmdb_max_age_days' => 0 ) ),
+			array( array( 'mmdb_max_age_days' => 3651 ) ),
+			array( array( 'mmdb_max_age_days' => '30' ) ),
 		);
 	}
 

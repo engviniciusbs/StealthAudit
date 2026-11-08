@@ -21,6 +21,7 @@ use StealthAudit\Audit\Recorder;
 use StealthAudit\Audit\Upgrades;
 use StealthAudit\Diagnostics\Collector;
 use StealthAudit\Diagnostics\Normalizer;
+use StealthAudit\Geo\Geolocation;
 use StealthAudit\Http\Api;
 use StealthAudit\Http\Assets;
 use StealthAudit\Http\Guard;
@@ -167,7 +168,9 @@ final class Runtime {
 		$clock                  = static fn (): int => time();
 		$panel                  = new Panel( $this->configuration, $urls, $access, dirname( __DIR__, 2 ) . '/templates/panel.php' );
 		( new Router( $urls, $panel, fn () => $this->storage()->state, $clock, new Assets( $this->configuration, dirname( __DIR__, 2 ) . '/assets' ) ) )->register();
-		( new Api( new Guard( $this->configuration, $access, $urls ), fn (): Storage => $this->storage(), fn (): array => $this->diagnostic_health(), $this->configuration, $clock ) )->register();
+		// GeoIP is read-time only and optional: no database configured, no resolver.
+		$geolocation = null === $this->configuration->mmdb_path ? null : new Geolocation( $this->configuration->mmdb_path, $this->configuration->mmdb_max_age_days, ABSPATH, $clock );
+		( new Api( new Guard( $this->configuration, $access, $urls ), fn (): Storage => $this->storage(), fn (): array => $this->diagnostic_health(), $this->configuration, $clock, $geolocation ) )->register();
 	}
 
 	/** Register the WP-Cron handler and schedule; independent of panel configuration. */

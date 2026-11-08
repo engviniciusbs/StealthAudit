@@ -7,7 +7,7 @@
  *
  * @package StealthAudit
  *
- * @var array{status:string,panel:string,rest:string,nonce:string,rest_nonce:string,login:string,query:array<string,string>,view:string,filters:array<string,string>,cursor:?string,invalid:bool,tabs:array<string,string>,action:string,hidden:array<string,string>,assets:array<string,string>,site:string,host:string} $stealthaudit_view
+ * @var array{status:string,panel:string,rest:string,nonce:string,rest_nonce:string,login:string,query:array<string,string>,view:string,filters:array<string,string>,cursor:?string,invalid:bool,tabs:array<string,string>,action:string,hidden:array<string,string>,assets:array<string,string>,site:string,host:string,geoip:bool} $stealthaudit_view
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -23,6 +23,8 @@ if ( ! in_array( $stealthaudit_status, $stealthaudit_known, true ) ) {
 	$stealthaudit_status = 'unknown';
 }
 $stealthaudit_authorized = 'authorized' === $stealthaudit_status;
+// The location column exists only when the operator configured a local GeoIP database.
+$stealthaudit_geoip = $stealthaudit_view['geoip'] && 'errors' !== $stealthaudit_current;
 
 $stealthaudit_labels = array(
 	'category'    => array(
@@ -65,6 +67,14 @@ $stealthaudit_labels = array(
 		'failed'      => __( 'a última execução falhou', 'stealthaudit' ),
 		'never'       => __( 'ainda não executada', 'stealthaudit' ),
 		'unavailable' => __( 'estado indisponível', 'stealthaudit' ),
+	),
+	'geolocation' => array(
+		'available'   => __( 'estimativa pela base GeoIP local atual, não o local do IP no momento do evento', 'stealthaudit' ),
+		'missing'     => __( 'indisponível: a base GeoIP configurada não foi encontrada ou não pode ser lida', 'stealthaudit' ),
+		'misplaced'   => __( 'indisponível: a base GeoIP está dentro da pasta pública do site e não é usada', 'stealthaudit' ),
+		'invalid'     => __( 'indisponível: a base GeoIP está corrompida ou inválida', 'stealthaudit' ),
+		'unsupported' => __( 'indisponível: o tipo de base não é suportado (use City ou Country)', 'stealthaudit' ),
+		'outdated'    => __( 'indisponível: a base GeoIP é mais antiga que a política de idade configurada', 'stealthaudit' ),
 	),
 	'diagnostics' => array(
 		'available'                => __( 'ativo nesta requisição', 'stealthaudit' ),
@@ -109,6 +119,12 @@ $stealthaudit_messages = array(
 	'capture_errors'   => __( 'Captura de erros:', 'stealthaudit' ),
 	'collector'        => __( 'Coletor de erros:', 'stealthaudit' ),
 	'maintenance'      => __( 'Manutenção:', 'stealthaudit' ),
+	'geolocation'      => __( 'Localização:', 'stealthaudit' ),
+	/* translators: %s: ISO 8601 UTC build time of the GeoIP database. */
+	'database_built'   => __( 'base compilada em %s', 'stealthaudit' ),
+	/* translators: %s: approximate place, for example "Londres, Inglaterra, Reino Unido (GB)". */
+	'geo_estimate'     => __( 'estimativa: %s', 'stealthaudit' ),
+	'geo_none'         => __( 'indisponível', 'stealthaudit' ),
 	/* translators: %s: ISO 8601 UTC time of the last maintenance run. */
 	'last_run'         => __( 'última execução %s', 'stealthaudit' ),
 	/* translators: %d: records discarded in the period closed by the last maintenance. */
@@ -242,7 +258,7 @@ $stealthaudit_screen = static function ( string $screen, string $heading, bool $
 	data-nonce="<?php echo esc_attr( $stealthaudit_view['nonce'] ); ?>"
 	data-rest-nonce="<?php echo esc_attr( $stealthaudit_view['rest_nonce'] ); ?>"
 	data-filters="<?php echo esc_attr( (string) wp_json_encode( (object) $stealthaudit_filters ) ); ?>"
-	data-cursor="<?php echo esc_attr( (string) $stealthaudit_view['cursor'] ); ?>">
+	data-cursor="<?php echo esc_attr( (string) $stealthaudit_view['cursor'] ); ?>"<?php echo $stealthaudit_geoip ? ' data-geoip' : ''; ?>>
 	<noscript><p class="notice"><?php esc_html_e( 'O StealthAudit precisa de JavaScript para verificar o acesso e carregar os registros. Esta página mostra o estado atual, mas os formulários ficam desativados sem script.', 'stealthaudit' ); ?></p></noscript>
 	<p class="visually-hidden" role="status" aria-live="polite" data-sa-live></p>
 
@@ -442,6 +458,9 @@ $stealthaudit_screen = static function ( string $screen, string $heading, bool $
 							<th scope="col"><?php esc_html_e( 'Usuário', 'stealthaudit' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Objeto', 'stealthaudit' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'IP', 'stealthaudit' ); ?></th>
+								<?php if ( $stealthaudit_geoip ) : ?>
+								<th scope="col" data-sa-geoip><?php esc_html_e( 'Local estimado (base atual)', 'stealthaudit' ); ?></th>
+								<?php endif; ?>
 							<th scope="col"><?php esc_html_e( 'Origem', 'stealthaudit' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Detalhes', 'stealthaudit' ); ?></th>
 							<?php endif; ?>

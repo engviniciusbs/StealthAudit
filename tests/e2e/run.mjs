@@ -471,6 +471,51 @@ try {
     return { errorRow: row.text.slice(0, 40) + '…', eventSummary: ev.text.slice(0, 40) + '…', rawJsonHexEscaped: raw, injectedElements: 0 };
   });
 
+  // ---------- GeoIP (read time, official MaxMind test database only) ----------
+  await step('GeoIP: no location column without an MMDB; with the test City DB, "estimativa" for known IPs and "indisponível" otherwise', async () => {
+    const geo = () => op.evaluate(() => {
+      const heads = [...document.querySelectorAll('[data-sa-table] thead th')];
+      const index = heads.findIndex((th) => th.hasAttribute('data-sa-geoip'));
+      const cells = index < 0 ? [] : [...document.querySelectorAll('[data-sa-rows] tr')].map((tr) => ({ text: tr.children[index]?.textContent || '', ip: tr.children[index - 1]?.textContent || '', muted: tr.children[index]?.classList.contains('muted') }));
+      const line = document.querySelector('[data-sa-geolocation]');
+      return { header: index < 0 ? null : heads[index].textContent, cells, line: line ? { state: line.getAttribute('data-sa-geolocation'), text: line.textContent } : null };
+    });
+    let list = listing(op, 'events');
+    await goto(op, panelUrl('view=audit'));
+    const plain = await (await list).json();
+    await records(op);
+    const before = await geo();
+    check(before.header === null && before.line === null && !('geolocation' in plain) && !plain.items.some((i) => 'location' in i), `location shown without an MMDB: ${JSON.stringify(before)}`);
+    const { path } = JSON.parse(fixture('geoip', { state: 'on' }));
+    fixture('config', { mmdb: path });
+    const out = {};
+    try {
+      list = listing(op, 'events');
+      await goto(op, panelUrl('view=audit&action=login_failed'));
+      const json = await (await list).json();
+      await records(op);
+      const shown = await geo();
+      const london = shown.cells.find((c) => c.ip === '81.2.69.160');
+      const japan = shown.cells.find((c) => c.ip === '2001:218::');
+      const other = shown.cells.find((c) => c.ip !== '81.2.69.160' && c.ip !== '2001:218::');
+      check(json.geolocation?.state === 'available' && json.geolocation.basis === 'current_database' && json.items.every((i) => ['estimate', 'unavailable'].includes(i.location?.status)), `API ${JSON.stringify(json.geolocation)}`);
+      check(shown.header === 'Local estimado (base atual)' && shown.line?.state === 'available' && shown.line.text.includes('não o local do IP no momento do evento') && /base compilada em \d{4}-\d\d-\d\dT/.test(shown.line.text), `header/line ${JSON.stringify(shown.line)}`);
+      check(london?.text === 'estimativa: Londres, Inglaterra, Reino Unido (GB)' && japan?.text === 'estimativa: Japão (JP)' && other?.text === 'indisponível' && other.muted, `cells ${JSON.stringify(shown.cells.slice(0, 4))}`);
+      await capture(op, 'audit-geoip');
+      Object.assign(out, { header: shown.header, london: london.text, japan: japan.text, other: `${other.ip} → ${other.text}` });
+    } finally {
+      fixture('config', {});
+      fixture('geoip', { state: 'off' });
+    }
+    list = listing(op, 'events');
+    await goto(op, panelUrl('view=audit'));
+    const after = await (await list).json();
+    await records(op);
+    check((await geo()).header === null && !('geolocation' in after), 'location column left after removing the MMDB');
+    out.afterRemoval = 'no column';
+    return out;
+  });
+
   // ---------- CSRF and direct REST ----------
   await step('CSRF: missing/forged nonces, cross Origin and Sec-Fetch-Site are rejected; state unchanged', async () => {
     const out = {};

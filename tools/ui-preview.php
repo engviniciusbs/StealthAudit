@@ -81,6 +81,7 @@ $base   = array(
 	),
 	'site'       => 'Fixture site',
 	'host'       => 'example.test',
+	'geoip'      => false,
 );
 $states = array(
 	'password'  => array( 'status' => 'password_required' ),

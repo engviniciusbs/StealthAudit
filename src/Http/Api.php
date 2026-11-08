@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace StealthAudit\Http;
 
 use StealthAudit\Config\Configuration;
+use StealthAudit\Geo\Geolocation;
 use StealthAudit\Security\AttemptsExhausted;
 use StealthAudit\Security\PanelAccess;
 use StealthAudit\Storage\Storage;
@@ -54,6 +55,7 @@ final class Api {
 	 * @param \Closure():array{status:string,dropped:int,buffered:int} $diagnostics Request diagnostic health.
 	 * @param Configuration                                            $configuration Capacity limits.
 	 * @param \Closure():int                                           $clock UTC clock.
+	 * @param Geolocation|null                                         $geolocation Read-time estimate; null when no MMDB is configured.
 	 */
 	public function __construct(
 		private readonly Guard $guard,
@@ -61,6 +63,7 @@ final class Api {
 		private readonly \Closure $diagnostics,
 		private readonly Configuration $configuration,
 		private readonly \Closure $clock,
+		private readonly ?Geolocation $geolocation = null,
 	) {}
 
 	/** Hook routes and response hardening; nothing runs outside our namespace. */
@@ -360,16 +363,18 @@ final class Api {
 			$records = 'events' === $kind ? $storage->events : $storage->errors;
 			$window  = $records->window( $query['filters'], $query['from'], $query['to'], $query['after'], $query['limit'], $now );
 			$items   = array_map( 'events' === $kind ? array( self::class, 'event' ) : array( self::class, 'error' ), $window['rows'] );
-			return self::respond(
-				array(
-					'items'       => $items,
-					'next_cursor' => Filters::cursor( $window['next'] ),
-					'limit'       => $query['limit'],
-					'timezone'    => 'UTC',
-					'capture'     => $this->capture( $storage, $now ),
-					'maintenance' => $this->maintenance( $storage, $now ),
-				)
+			$data    = array(
+				'items'       => $items,
+				'next_cursor' => Filters::cursor( $window['next'] ),
+				'limit'       => $query['limit'],
+				'timezone'    => 'UTC',
+				'capture'     => $this->capture( $storage, $now ),
+				'maintenance' => $this->maintenance( $storage, $now ),
 			);
+			if ( 'events' === $kind && null !== $this->geolocation ) {
+				[ $data['items'], $data['geolocation'] ] = self::locate( $this->geolocation, $items );
+			}
+			return self::respond( $data );
 		} catch ( \Throwable $failure ) {
 			return Guard::error( 503 );
 		}
@@ -423,6 +428,46 @@ final class Api {
 			'state'          => $report['state'],
 			'last_run'       => null === $report['last_run'] ? null : Filters::format( $report['last_run'] ),
 			'dropped_before' => $report['dropped_before'],
+		);
+	}
+
+	/**
+	 * Attach a location estimate to each displayed row, resolved now and never stored.
+	 *
+	 * The database opens once for the page; a failure leaves every IP shown and every
+	 * location "unavailable", and never fails the query.
+	 *
+	 * @param Geolocation               $geolocation Configured resolver.
+	 * @param list<array<string,mixed>> $items Public event items.
+	 * @return array{0:list<array<string,mixed>>,1:array{state:string,basis:string,database_built:?string}} Items and the page-level state.
+	 */
+	private static function locate( Geolocation $geolocation, array $items ): array {
+		try {
+			$found = $geolocation->resolve( array_column( $items, 'ip' ) );
+		} catch ( \Throwable $failure ) {
+			$found = array(
+				'state'     => 'invalid',
+				'built'     => null,
+				'locations' => array(),
+			);
+		}
+		foreach ( $items as $index => $item ) {
+			$place                       = is_string( $item['ip'] ) ? ( $found['locations'][ $item['ip'] ] ?? null ) : null;
+			$items[ $index ]['location'] = null === $place ? array(
+				'status'       => 'unavailable',
+				'country_code' => null,
+				'country'      => null,
+				'region'       => null,
+				'city'         => null,
+			) : array( 'status' => 'estimate' ) + $place;
+		}
+		return array(
+			$items,
+			array(
+				'state'          => $found['state'],
+				'basis'          => 'current_database',
+				'database_built' => null === $found['built'] ? null : Filters::format( $found['built'] ),
+			),
 		);
 	}
 

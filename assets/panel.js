@@ -26,7 +26,8 @@
 		nonce: root.getAttribute( 'data-nonce' ) || '',
 		restNonce: root.getAttribute( 'data-rest-nonce' ) || '',
 		status: root.getAttribute( 'data-status' ) || '',
-		view: 'errors' === root.getAttribute( 'data-view' ) ? 'errors' : 'audit'
+		view: 'errors' === root.getAttribute( 'data-view' ) ? 'errors' : 'audit',
+		geoip: root.hasAttribute( 'data-geoip' )
 	};
 	var live = root.querySelector( '[data-sa-live]' );
 
@@ -515,6 +516,9 @@
 			complete = complete && 'available' === state.diagnostics;
 		}
 		capture.appendChild( maintenanceLine( data && data.maintenance, kind ) );
+		if ( cfg.geoip && 'events' === kind ) {
+			capture.appendChild( geolocationLine( data && data.geolocation ) );
+		}
 		capture.hidden = false;
 		return complete;
 	}
@@ -536,6 +540,34 @@
 		}
 		line.appendChild( document.createTextNode( ' ' + parts.join( '; ' ) ) );
 		return line;
+	}
+
+	/* Location is an estimate from the current database, never the place at the time of the event. */
+	function geolocationLine( state ) {
+		var own = state && 'object' === typeof state ? state : { state: 'invalid', database_built: null };
+		var line = el( 'p' );
+		line.setAttribute( 'data-sa-geolocation', own.state );
+		line.appendChild( el( 'strong', '', text( 'geolocation' ) ) );
+		var parts = [ label( 'geolocation', own.state ) ];
+		if ( 'string' === typeof own.database_built ) {
+			parts.push( text( 'database_built' ).replace( '%s', own.database_built ) );
+		}
+		line.appendChild( document.createTextNode( ' ' + parts.join( '; ' ) ) );
+		return line;
+	}
+
+	function place( location ) {
+		if ( ! location || 'estimate' !== location.status ) {
+			return '';
+		}
+		var parts = [ location.city, location.region, location.country ].filter( function ( part ) {
+			return 'string' === typeof part && '' !== part;
+		} );
+		var name = parts.join( ', ' );
+		if ( 'string' === typeof location.country_code && '' !== location.country_code ) {
+			name += ( '' === name ? '' : ' ' ) + '(' + location.country_code + ')';
+		}
+		return name;
 	}
 
 	function cell( tr, value, className ) {
@@ -573,6 +605,10 @@
 		}
 		cell( tr, item.object_type + ( null === item.object_id ? '' : ' #' + item.object_id ), 'nowrap' );
 		cell( tr, null === item.ip ? text( 'none' ) : item.ip, null === item.ip ? 'nowrap muted' : 'nowrap' );
+		if ( cfg.geoip ) {
+			var where = place( item.location );
+			cell( tr, '' === where ? text( 'geo_none' ) : text( 'geo_estimate' ).replace( '%s', where ), '' === where ? 'nowrap muted' : 'nowrap' );
+		}
 		cell( tr, label( 'origin', item.origin ), 'nowrap' );
 		cell( tr, summary( item.summary ), 'wrap' );
 		return tr;

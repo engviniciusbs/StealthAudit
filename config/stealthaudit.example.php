@@ -15,5 +15,6 @@ return array(
 	'installation_id'     => '', // Stable unique installation ID; preserve across URL/key changes.
 	'trusted_proxies'     => array(), // Exact IP or CIDR; empty ignores forwarding headers.
 	'limits'              => array(), // See Configuration::DEFAULT_LIMITS.
-	'mmdb_path'           => null, // Optional local absolute path; no download performed.
+	'mmdb_path'           => null, // Optional absolute path to a City/Country MMDB outside the webroot; no download performed.
+	'mmdb_max_age_days'   => 30, // A database built longer ago than this is not used: location shows as unavailable.
 );
