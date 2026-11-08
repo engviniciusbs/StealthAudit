@@ -319,12 +319,17 @@ try {
     const http = (await fetch(`http://127.0.0.1:${PORT}/`)).status;
     const snap = flow('snapshot');
     check(snap.boot === 'ready' && snap.version === version && snap.schema && snap.cron_next, JSON.stringify(snap));
-    return { installedFiles: files, identicalToZip: true, homepage: http, version: snap.version, schema: snap.schema, cronScheduled: true };
+    // `wp core install` (wp-env start) auto-detects mod_rewrite and may leave pretty permalinks on.
+    results.initialPermalinks = wp('option', 'get', 'permalink_structure');
+    return { installedFiles: files, identicalToZip: true, homepage: http, version: snap.version, schema: snap.schema, cronScheduled: true, initialPermalinks: results.initialPermalinks || 'plain' };
   });
 
   // ---------- 3. smoke + full E2E on the artifact ----------
   await step('Package smoke (no other plugin): classes, QR, TOTP + PSR clock, cipher, GeoIP from the scoped vendor', () => smoke('none'));
   if (!flag('skip-e2e')) {
+    // tests/e2e/run.mjs starts from plain permalinks and switches to pretty ones (served by Apache)
+    // and back itself; its restore returns the site to this state.
+    wp('rewrite', 'structure', '');
     await step('Full browser E2E (tests/e2e/run.mjs) against the installed artifact', () => e2e('e2e-artifact'));
   }
 
