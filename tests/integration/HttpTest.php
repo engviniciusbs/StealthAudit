@@ -138,6 +138,46 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		$this->assert_private_headers();
 	}
 
+	public function test_ended_wordpress_session_is_401_not_a_stale_nonce(): void {
+		global $wp_rest_auth_cookie;
+		$previous = $wp_rest_auth_cookie;
+		$this->enroll();
+		$rest_nonce = wp_create_nonce( 'wp_rest' );
+		// Serve_request() order: core cookie check, then rest_post_dispatch, as in a real browser.
+		$authenticate = function () use ( $rest_nonce ): WP_REST_Response {
+			$_SERVER['HTTP_X_WP_NONCE'] = $rest_nonce;
+			$request = $this->request( 'GET', '/events' );
+			$result = rest_cookie_check_errors( null );
+			$response = is_wp_error( $result ) ? rest_convert_error_to_response( $result ) : rest_ensure_response( rest_get_server()->dispatch( $request ) );
+			return apply_filters( 'rest_post_dispatch', $response, rest_get_server(), $request );
+		};
+		try {
+			// Valid cookie, stale nonce: still core's 403 (the page asks for a reload).
+			$wp_rest_auth_cookie = true;
+			$_SERVER['HTTP_X_WP_NONCE'] = 'stale';
+			$request = $this->request( 'GET', '/events' );
+			$stale = apply_filters( 'rest_post_dispatch', rest_convert_error_to_response( rest_cookie_check_errors( null ) ), rest_get_server(), $request );
+			self::assertSame( 403, $stale->get_status() );
+			self::assertSame( 'rest_cookie_invalid_nonce', $stale->get_data()['code'] );
+			// Session revoked or logged out: determine_current_user() found nobody.
+			WP_Session_Tokens::get_instance( $this->user )->destroy( $this->token );
+			foreach ( array( 'bad_session_token', 'expired', 'malformed' ) as $reason ) {
+				$wp_rest_auth_cookie = $reason;
+				wp_set_current_user( 0 );
+				$ended = $authenticate();
+				$this->responses[] = $ended;
+				$this->assert_denied( $ended, 401, 'stealthaudit_unauthenticated' );
+			}
+			// Another namespace keeps WordPress's own answer.
+			$other = apply_filters( 'rest_post_dispatch', rest_convert_error_to_response( rest_cookie_check_errors( null ) ), rest_get_server(), new WP_REST_Request( 'GET', '/wp/v2/users/me' ) );
+			self::assertSame( 'rest_cookie_invalid_nonce', $other->get_data()['code'] );
+			$this->assert_private_headers();
+		} finally {
+			$wp_rest_auth_cookie = $previous;
+			unset( $_SERVER['HTTP_X_WP_NONCE'] );
+		}
+	}
+
 	public function test_backend_failure_with_existing_proof_is_503_without_data(): void {
 		$this->enroll();
 		self::assertSame( 200, $this->call( 'GET', '/errors' )->get_status() );

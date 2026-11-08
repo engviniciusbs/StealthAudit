@@ -201,7 +201,7 @@ final class Panel {
 				$links .= '<link rel="stylesheet" href="' . esc_url( $styled->asset( $file ) ) . '">'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Standalone status page outside the theme.
 			}
 		}
-		$body = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>StealthAudit</title>' . $links . '</head><body><main class="container screen"><section class="auth"><h1>StealthAudit</h1><p>' . esc_html( $message ) . '</p></section></main></body></html>';
+		$body = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><meta name="description" content="' . esc_attr__( 'Painel do StealthAudit: auditoria e erros do WordPress para operadores autorizados.', 'stealthaudit' ) . '"><title>StealthAudit</title>' . $links . '</head><body><main class="container screen"><section class="auth"><h1>StealthAudit</h1><p>' . esc_html( $message ) . '</p></section></main></body></html>';
 		return new Response( $status, Headers::page() + $extra, $body );
 	}
 }

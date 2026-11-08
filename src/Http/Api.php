@@ -238,11 +238,31 @@ final class Api {
 	 */
 	public function post_dispatch( mixed $response, mixed $server, mixed $request ): mixed {
 		if ( $response instanceof \WP_HTTP_Response && $request instanceof \WP_REST_Request && self::ours( $request ) ) {
+			$response = self::session_ended( $response );
 			foreach ( Headers::private() as $name => $value ) {
 				$response->header( $name, $value );
 			}
 		}
 		return $response;
+	}
+
+	/**
+	 * Tell an ended WordPress session apart from a stale page.
+	 *
+	 * After logout, revocation or expiry the cookie no longer identifies anyone, so core's
+	 * cookie check rejects the X-WP-Nonce as 403 rest_cookie_invalid_nonce before any
+	 * permission callback runs. The panel must then offer the WordPress login (401), not a
+	 * reload. A valid cookie with a stale nonce keeps core's 403. Either way it is a denial.
+	 *
+	 * @param \WP_HTTP_Response $response Response in our namespace.
+	 */
+	private static function session_ended( \WP_HTTP_Response $response ): \WP_HTTP_Response {
+		global $wp_rest_auth_cookie;
+		$data = $response->get_data();
+		if ( 403 !== $response->get_status() || ! is_array( $data ) || 'rest_cookie_invalid_nonce' !== ( $data['code'] ?? null ) || true === $wp_rest_auth_cookie || is_user_logged_in() ) {
+			return $response;
+		}
+		return rest_convert_error_to_response( Guard::error( 401 ) );
 	}
 
 	/**
