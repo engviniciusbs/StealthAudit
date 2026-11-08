@@ -15,8 +15,11 @@ node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit compo
 npm run test:unit
 npm run test:integration
 npm run quality
+npm run test:e2e
 npm run env:test:stop
 ```
+
+`test:e2e` precisa também de OpenSSL e Google Chrome locais; o que ele cria e restaura está em [phase-6-e2e.md](phase-6-e2e.md).
 
 O `composer install` usa as versões exatas do lockfile; não executar `update` implicitamente. As restrições `~` dos três pacotes de produção permitem apenas patches da minor contratada em uma atualização deliberada. O lock fixa OTPHP 11.5.0, BaconQrCode 3.1.1 e GeoIP2 3.4.0.
 

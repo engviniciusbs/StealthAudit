@@ -57,4 +57,4 @@ Smoke HTTP real em `http://localhost:8880` (Apache do wp-env). Sem cabeçalho de
 - Método errado devolve o 404 `rest_no_route` do WordPress, não 405. Erros REST têm mensagens genéricas em inglês; a página usa português.
 - Erros são paginados por `first_seen` sem índice dedicado (varredura limitada pelo teto de linhas de erros); um índice exigiria migração de esquema. Uma ocorrência agregada aparece no período pelo seu primeiro registro da janela de cinco minutos.
 - `dropped` e o contador de linhas do orçamento são cumulativos até a manutenção da fase 7; `suspended` reflete esse contador, não uma contagem física.
-- UI, acessibilidade e Hallmark: ver [phase-6-ui.md](phase-6-ui.md). Browser real ponta a ponta e QR escaneado em aplicativo continuam pendentes.
+- UI, acessibilidade e Hallmark: ver [phase-6-ui.md](phase-6-ui.md). TLS real por proxy local, cache HTTP de teste, permalinks bonitos pelo Apache, troca de tema e subdiretório simulado foram verificados no navegador na fase 6c ([phase-6-e2e.md](phase-6-e2e.md)); o escaneamento físico do QR em aplicativo continua pendente.

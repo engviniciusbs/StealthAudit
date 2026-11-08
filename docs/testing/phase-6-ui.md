@@ -65,7 +65,7 @@ Rodadas anteriores encontraram e corrigiram: CSS não associado às páginas (as
 
 ## Limitações
 
-- Sem fluxo real por navegador do login WP até o desafio e filtros, sem QR escaneado em aplicativo e sem render na rota autenticada: ficam para a fase 6c.
+- O fluxo real por navegador, a decodificação independente do QR e o render dos estados reais autenticados foram feitos na fase 6c ([phase-6-e2e.md](phase-6-e2e.md)), que também corrigiu a tela "Sessão do WordPress encerrada" (antes uma sessão encerrada aparecia como página desatualizada). Continuam pendentes o QR escaneado num celular e o render `--url` direto na rota autenticada.
 - Teclado, foco e leitores de tela foram verificados por inspeção do código e pelos gates automáticos, não com leitor de tela real. 320px não foi capturado isoladamente (o render mede 375px e a ausência de overflow).
 - Sem JavaScript a consulta de registros e a autenticação não funcionam (informado na página).
 - Martian Mono não é distribuída; a aparência depende da monoespaçada do sistema.
