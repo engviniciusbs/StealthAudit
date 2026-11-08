@@ -175,7 +175,12 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		$stale = $this->now + Maintenance::PENDING_STALE;
 		self::assertSame( 'complete', $this->storage->maintenance->run( $stale )['result'] );
 		$budget = $this->storage->state->get( 'budget:events', $stale )['payload'];
-		self::assertSame( array( 1201, 0, $stale ), array( $budget['rows'], $budget['pending'], $budget['pending_reset'] ) );
+		// The blocked run's two full batches each saw that reservation in flight, so the resumed
+		// publish keeps a margin of 2 (it could have committed behind the cursor).
+		self::assertSame( array( 1203, 0, $stale ), array( $budget['rows'], $budget['pending'], $budget['pending_reset'] ) );
+		// The next recount starts clean and has nothing in flight: exact again.
+		self::assertSame( 'complete', $this->storage->maintenance->run( $stale )['result'] );
+		self::assertSame( 1201, $this->storage->state->get( 'budget:events', $stale )['payload']['rows'] );
 	}
 
 	public function test_schema_migration_from_version_1_is_idempotent_contested_and_keeps_cursors(): void {
@@ -245,6 +250,104 @@ final class MaintenanceTest extends PHPUnit\Framework\TestCase {
 		$scheduler->run();
 		self::assertSame( array( 0, 0 ), array( $this->rows_in( 'events' ), $this->rows_in( 'errors' ) ) );
 		self::assertSame( 'current', $this->storage->maintenance->report( $this->now )['state'] );
+	}
+
+	public function test_orphaned_pending_ages_out_even_while_the_site_keeps_writing(): void {
+		$start  = $this->now;
+		$budget = new Budget( $this->storage->state, Configuration::from_array( array( 'limits' => array( 'events_per_request' => 1000 ) ) ) );
+		// One request dies between reserve() and complete().
+		self::assertTrue( $budget->reserve( 'events', 100, $start ) );
+		// The site keeps reserving and completing every minute for 16 minutes.
+		for ( $time = $start + 60; $time <= $start + 960; $time += 60 ) {
+			self::assertTrue( $budget->reserve( 'events', 100, $time ) );
+			$budget->complete( 'events', $time );
+			$payload = $this->storage->state->get( 'budget:events', $time )['payload'];
+			self::assertLessThanOrEqual( 16, count( $payload['pending_by_minute'] ) );
+			self::assertSame( 1, $payload['pending'] );
+			self::assertSame( $time, $payload['second'] );
+			if ( $start + 300 === $time ) {
+				// Five minutes later the orphan is still recent: conservative, publish waits.
+				self::assertSame( 'blocked', $this->storage->maintenance->run( $time )['result'] );
+			}
+		}
+		// The old rule (no reservation at all for 900 s) would never clear it on this site.
+		$late   = $start + 960;
+		$result = $this->storage->maintenance->run( $late );
+		self::assertSame( 'complete', $result['result'] );
+		$payload = $this->storage->state->get( 'budget:events', $late )['payload'];
+		self::assertSame( array( 0, array(), $late, 0 ), array( $payload['pending'], $payload['pending_by_minute'], $payload['pending_reset'], $payload['rows'] ) );
+	}
+
+	public function test_a_recent_pending_is_retried_within_the_run_before_blocking(): void {
+		// Deterministic: a pending that never completes costs exactly three retries.
+		$budget = new Budget( $this->storage->state, Configuration::from_array( array() ) );
+		self::assertTrue( $budget->reserve( 'errors', 100, $this->now ) );
+		$run = $this->storage->maintenance->run( $this->now );
+		self::assertSame( 'blocked', $run['result'] );
+		// 3 purges + auxiliary count + events publish + errors (1 + 3 retries).
+		self::assertSame( 9, $run['batches'] );
+		$budget->complete( 'errors', $this->now );
+		self::assertSame( 'complete', $this->storage->maintenance->run( $this->now )['result'] );
+		// Real concurrency: another process completes its reservation 150 ms after "go".
+		[ $process, $pipes ] = $this->worker( 'pending' );
+		fwrite( $pipes[0], "go\n" );
+		fclose( $pipes[0] );
+		$result = $this->storage->maintenance->run( $this->now );
+		self::assertSame( '1', trim( stream_get_contents( $pipes[1] ) ) );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		self::assertSame( 0, proc_close( $process ) );
+		self::assertSame( 'complete', $result['result'] );
+		self::assertSame( 0, $this->storage->state->get( 'budget:events', $this->now )['payload']['pending'] );
+	}
+
+	public function test_multi_batch_recount_adds_a_margin_for_rows_committed_behind_the_cursor(): void {
+		// ids 1..1200 without 100: id 100 stands for an INSERT allocated but not yet committed.
+		$values = array();
+		for ( $id = 1; $id <= 1200; ++$id ) {
+			if ( 100 !== $id ) {
+				$values[] = $this->connection->prepare( "(%d,1,%s,'content','created','success','cli','post','{}',100)", $id, gmdate( 'Y-m-d H:i:s', $this->now - 60 ) );
+			}
+		}
+		$this->db->execute( 'INSERT INTO %i (id,record_version,occurred_at,category,action,result,origin,object_type,summary,logical_bytes) VALUES ' . implode( ',', $values ), $this->db->table( 'events' ) );
+		$writer = new Budget( $this->storage->state, Configuration::from_array( array() ) );
+		self::assertTrue( $writer->reserve( 'events', 100, $this->now ) );
+		// Three purges, the auxiliary count and one recount batch (ids 1..501) in flight.
+		self::assertSame( 'partial', $this->storage->maintenance->run( $this->now, 5 )['result'] );
+		$cursor = $this->storage->state->get( Maintenance::STATUS_KEY, $this->now )['payload']['cursor']['events'];
+		self::assertSame( array( 501, 500, 1, Maintenance::RECORD_BYTES['events'] ), array( $cursor['id'], $cursor['rows'], $cursor['margin_rows'], $cursor['margin_bytes'] ) );
+		// The writer commits behind the cursor, then completes before the final read.
+		$this->db->execute( "INSERT INTO %i (id,record_version,occurred_at,category,action,result,origin,object_type,summary,logical_bytes) VALUES (100,1,%s,'content','created','success','cli','post','{}',100)", $this->db->table( 'events' ), gmdate( 'Y-m-d H:i:s', $this->now ) );
+		$writer->complete( 'events', $this->now );
+		self::assertSame( 'complete', $this->storage->maintenance->run( $this->now )['result'] );
+		$budget   = $this->storage->state->get( 'budget:events', $this->now )['payload'];
+		$physical = $this->db->rows( 'SELECT COUNT(*) AS n, SUM(logical_bytes) AS b FROM %i', $this->db->table( 'events' ) )[0];
+		self::assertSame( 1200, (int) $physical['n'] );
+		// The scan saw 1,199 rows; the margin keeps the counter at the physical count.
+		self::assertSame( 1200, $budget['rows'] );
+		self::assertGreaterThanOrEqual( (int) $physical['b'], $budget['bytes'] );
+	}
+
+	public function test_maintenance_runs_and_reports_when_auxiliary_capacity_is_full(): void {
+		// Capacity equal to the five fixed rows: no proof, limit or lease can be created.
+		$full = $this->fresh( array( 'state_rows' => 5 ) );
+		self::assertFalse( $full->state->create( 'proof:' . hash( 'sha256', 'x' ), array( 'a' => 1 ), $this->now + 60 ) );
+		self::assertSame( 'never', $full->maintenance->report( $this->now )['state'] );
+		self::assertSame( 'complete', $full->maintenance->run( $this->now )['result'] );
+		self::assertSame( array( 'state' => 'current', 'last_run' => $this->now ), array_slice( $full->maintenance->report( $this->now ), 0, 2 ) );
+		self::assertSame( 5, $this->rows_in( 'state' ) );
+		// A lost status row with maintained budgets is reported as unavailable, not "never".
+		$this->db->execute( 'DELETE FROM %i WHERE state_key=%s', $this->db->table( 'state' ), Maintenance::STATUS_KEY );
+		self::assertSame( 'unavailable', $full->maintenance->report( $this->now )['state'] );
+	}
+
+	private function worker( string $mode ): array {
+		$process = proc_open( array( PHP_BINARY, dirname( __DIR__ ) . '/fixtures/storage-worker.php' ), array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes );
+		self::assertIsResource( $process );
+		fwrite( $pipes[0], json_encode( array( 'user' => DB_USER, 'password' => DB_PASSWORD, 'name' => DB_NAME, 'host' => DB_HOST, 'prefix' => $this->prefix, 'mode' => $mode, 'now' => $this->now ) ) . "\n" );
+		stream_set_timeout( $pipes[1], 30 );
+		self::assertSame( "ready\n", fgets( $pipes[1] ) );
+		return array( $process, $pipes );
 	}
 
 	private function fresh( array $limits = array() ): Storage {

@@ -91,7 +91,8 @@ final class StorageTest extends PHPUnit\Framework\TestCase {
 		$one = $this->fresh( array( 'errors_per_request' => 1 ) );
 		self::assertTrue( $one->errors->append( array( 'severity' => 'warning', 'message' => 'synthetic diagnostic' ), $now ) );
 		self::assertFalse( $one->errors->append( array( 'severity' => 'warning', 'message' => 'synthetic diagnostic' ), $now ) );
-		$state = new StateRepository( $this->db, 4 );
+		// Five fixed rows: three budgets plus the maintenance lease and status (schema install).
+		$state = new StateRepository( $this->db, 6 );
 		self::assertTrue( $state->create( 'factor:1', array( 'generation' => 1 ), null ) );
 		self::assertFalse( $state->create( 'factor:2', array( 'generation' => 1 ), null ) );
 	}

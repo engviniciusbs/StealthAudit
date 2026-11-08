@@ -837,7 +837,8 @@ try {
   await browser?.close().catch(() => {});
   await proxy?.close().catch(() => {});
   await attacker?.close().catch(() => {});
-  if (setUp) {
+  // Setup may fail before writing the snapshot; then there is nothing to inspect or restore.
+  if (setUp && existsSync(join(OUT, 'snapshot.json'))) {
     try {
       const inspect = JSON.parse(fixture('inspect'));
       results.push({ id: 'teardown-inspect', secretInEvents: inspect.secret_in_event, newEvents: inspect.new_events, newErrors: inspect.new_errors });

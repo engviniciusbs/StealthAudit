@@ -141,6 +141,20 @@ KEY expires (expires_at,state_key)
 			$payload = 'state' === $kind ? '{"rows":3}' : '{"rows":0,"bytes":0,"second":0,"rate":0,"dropped":0,"pending":0}';
 			$this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,1,%s,NULL)', $state, 'budget:' . $kind, $payload );
 		}
+		// Fixed maintenance rows exist from install on, so maintenance can always lease and
+		// report even when auxiliary capacity is full. Each new row is counted in the budget.
+		$fixed = array(
+			array( Maintenance::lease_key(), '{"owner":""}', '1970-01-01 00:00:01' ),
+			array( Maintenance::STATUS_KEY, '{"result":"never"}', null ),
+		);
+		foreach ( $fixed as [ $key, $payload, $expires ] ) {
+			$added = null === $expires
+				? $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,1,%s,NULL)', $state, $key, $payload )
+				: $this->db->execute( 'INSERT IGNORE INTO %i (state_key,revision,payload,expires_at) VALUES (%s,1,%s,%s)', $state, $key, $payload, $expires );
+			if ( 1 === $added ) {
+				$this->db->execute( "UPDATE %i SET payload=JSON_SET(payload,'$.rows',CAST(JSON_EXTRACT(payload,'$.rows') AS UNSIGNED)+1),revision=revision+1 WHERE state_key=%s", $state, 'budget:state' );
+			}
+		}
 	}
 
 	/**
