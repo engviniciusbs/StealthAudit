@@ -149,6 +149,9 @@ async function httpCollect() {
   }
   mode('on');
   const written = bench('count').events.rows - before;
+  // Each "on" request must have written its one event: a budget refusal (e.g. a host fast enough
+  // to pass 60 events/s sequentially) would time a request without the INSERT.
+  if (written !== onRequests) throw new Error(`HTTP on arm wrote ${written} events for ${onRequests} requests`);
   return { requests_per_mode: HTTP_REQUESTS, events_written_on: written, on_requests: onRequests, off: stats(samples.off), on: stats(samples.on), p50_delta_ms: round(stats(samples.on).p50 - stats(samples.off).p50), p95_delta_ms: round(stats(samples.on).p95 - stats(samples.off).p95) };
 }
 async function burst(state, clients, each) {
@@ -238,9 +241,15 @@ try {
       run.cli[state].push(bench('collect', { iterations: ITERATIONS, warmup: 30 }, 'loop'));
     }
     mode('on');
-    const cli = (state, key) => Math.min(...run.cli[state].map((r) => r.ms[key]));
-    run.cli.p50_delta_ms = round(cli('on', 'p50') - cli('off', 'p50'));
-    run.cli.p95_delta_ms = round(cli('on', 'p95') - cli('off', 'p95'));
+    // Verdict: percentiles over the pooled samples of both processes per mode. The better of the
+    // two runs per mode is kept only as a noise floor (it was the verdict before fix round 1).
+    const pooled = (state) => stats(run.cli[state].flatMap((r) => r.samples));
+    run.cli.pooled = { off: pooled('off'), on: pooled('on') };
+    run.cli.p50_delta_ms = round(run.cli.pooled.on.p50 - run.cli.pooled.off.p50);
+    run.cli.p95_delta_ms = round(run.cli.pooled.on.p95 - run.cli.pooled.off.p95);
+    const best = (state, key) => Math.min(...run.cli[state].map((r) => r.ms[key]));
+    run.cli.best_of_runs_p95_delta_ms = round(best('on', 'p95') - best('off', 'p95'));
+    for (const state of ['off', 'on']) for (const r of run.cli[state]) delete r.samples;
     run.cli.memory_footprint_delta_bytes = Math.min(...run.cli.on.map((r) => r.memory_at_start)) - Math.min(...run.cli.off.map((r) => r.memory_at_start));
     run.cli.memory_growth_on_bytes = Math.max(...run.cli.on.map((r) => r.memory_growth));
     run.cli.memory_growth_off_bytes = Math.max(...run.cli.off.map((r) => r.memory_growth));
@@ -320,7 +329,8 @@ function summary(r) {
     });
     lines.push(`| ${label} | ${target} | ${cells.join(' | ')} |`);
   };
-  row('Acréscimo p95 por ação, WP-CLI (ms)', '≤ 20', (x) => x.cli?.p95_delta_ms, 20);
+  row('Acréscimo p95 por ação, WP-CLI, amostras dos 2 processos somadas (ms)', '≤ 20', (x) => x.cli?.p95_delta_ms, 20);
+  row('  idem, melhor processo de cada modo (piso de ruído) (ms)', '—', (x) => x.cli?.best_of_runs_p95_delta_ms);
   row('Acréscimo p95 por requisição HTTP (ms)', '≤ 20', (x) => x.http?.p95_delta_ms, 20);
   row('Memória adicional no boot (MiB)', '≤ 5', (x) => x.cli && round(x.cli.memory_footprint_delta_bytes / 2 ** 20), 5);
   row(`Crescimento de memória em ${r.cli_iterations + 30} coletas (MiB)`, '≤ 5', (x) => x.cli && round(x.cli.memory_growth_on_bytes / 2 ** 20), 5);

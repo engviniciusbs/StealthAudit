@@ -140,6 +140,8 @@ switch ( $bench_action ) {
 				'events_written' => $after_max - $before_max,
 				'expected'       => $warmup + $iterations,
 				'ms'             => $bench_stats( $samples ),
+				// Raw samples so the runner can pool both processes of one mode.
+				'samples'        => array_map( static fn ( float $s ): float => round( $s, 4 ), $samples ),
 				// Row counts, not MAX(id): a bulk INSERT ... SELECT leaves auto-increment gaps.
 				// Memory of the booted request before the loop (plugin footprint) and its growth.
 				'memory_at_start' => $memory,

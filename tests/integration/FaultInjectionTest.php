@@ -201,6 +201,7 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 		$started  = hrtime( true );
 		$timedout = $storage->events->append( $this->event(), time() );
 		$fail_ms  = self::ms( $started );
+		$cause    = $short->last_error;
 		$queries  = $short->num_queries;
 		$started  = hrtime( true );
 		$retry    = $storage->events->append( $this->event(), time() );
@@ -209,6 +210,11 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 		[ $exit, $rest, $error ] = $this->finish( $holder, $pipes );
 		self::assertSame( 0, $exit, $error );
 		self::assertFalse( $timedout );
+		// It failed because the 1 s lock wait expired, not for any other reason (connection, SQL):
+		// the server's own error, after about the session timeout and before the 3 s holder released.
+		self::assertStringContainsString( 'Lock wait timeout', $cause );
+		self::assertGreaterThan( 900, $fail_ms );
+		self::assertLessThan( 2900, $fail_ms );
 		self::assertFalse( $retry );
 		$short->close();
 		// No reservation leaked: the failed CAS never committed, and a new request writes again.
@@ -252,6 +258,8 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 		$accepted = array_sum( array_column( $outcomes, 'accepted' ) );
 		$samples  = array_merge( ...array_column( $outcomes, 'samples' ) );
 		sort( $samples );
+		// Nearest-rank percentiles, the same method as benchmarks/ (ceil(q*n)-1).
+		$rank     = static fn ( float $q ): float => $samples[ (int) max( 0, ceil( $q * count( $samples ) ) - 1 ) ];
 		self::assertSame( 200, $accepted + array_sum( array_column( $outcomes, 'rejected' ) ) );
 		// Lost CAS rounds may reject (fail closed); every accepted write is one row and one count.
 		self::assertSame( $accepted, $this->rows( 'events' ) );
@@ -267,8 +275,8 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 				'appends_each'   => 50,
 				'accepted'       => $accepted,
 				'rejected'       => 200 - $accepted,
-				'append_p50_ms'  => $samples[ (int) floor( 0.50 * ( count( $samples ) - 1 ) ) ],
-				'append_p95_ms'  => $samples[ (int) floor( 0.95 * ( count( $samples ) - 1 ) ) ],
+				'append_p50_ms'  => $rank( 0.50 ),
+				'append_p95_ms'  => $rank( 0.95 ),
 				'append_max_ms'  => end( $samples ),
 				'counter_exact'  => true,
 				'pending_left'   => $budget['pending'],
@@ -360,6 +368,8 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 9995, $storm['health']['dropped'] );
 		self::assertSame( 'limited', $storm['health']['status'] );
 		self::assertLessThan( 1048576, $storm['memory_bytes'] );
+		// At most five appends of six statements each (two CAS rounds + write): no retry after refusal.
+		self::assertLessThanOrEqual( 30, $storm['sql'] );
 		self::record(
 			$distinct ? 'warning_storm_distinct' : 'warning_storm_repeated',
 			array(
