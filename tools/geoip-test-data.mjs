@@ -21,6 +21,7 @@ const FILES = {
   'test-data/GeoIP2-City-Test-Broken-Double-Format.mmdb': 'a340a6871b8bee8351befb8ad26f5229453705dddee0e948a35a65916c931e9c',
   'LICENSE-MIT': '91276db973f25602d1aa43491f59cbc84cb88e6f151e1d0cc82a755563ce0195',
 };
+const TIMEOUT_MS = 30_000; // per file; a stalled network fails the run instead of hanging it
 const OUT = join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), 'artifacts/geoip');
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -30,7 +31,7 @@ for (const [source, expected] of Object.entries(FILES)) {
   const target = join(OUT, source.split('/').pop());
   if (existsSync(target) && sha256(readFileSync(target)) === expected) continue;
   const url = `https://raw.githubusercontent.com/maxmind/MaxMind-DB/${COMMIT}/${source}`;
-  const response = await fetch(url, { redirect: 'error' });
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!response.ok) throw new Error(`GeoIP test data: HTTP ${response.status} for ${source}`);
   const bytes = Buffer.from(await response.arrayBuffer());
   if (sha256(bytes) !== expected) throw new Error(`GeoIP test data: checksum mismatch for ${source}; nothing written`);

@@ -109,6 +109,12 @@ switch ( $e2e_action ) {
 		if ( ! is_dir( $e2e_dir ) && ! mkdir( $e2e_dir, 0700, true ) ) {
 			WP_CLI::error( 'Cannot create artifacts/e2e.' );
 		}
+		// A site no request has reached yet (the compatibility matrix) has no tables; install
+		// them before the snapshot so restore compares against the installed schema.
+		$e2e_storage = new \StealthAudit\Storage\Storage( $wpdb, \StealthAudit\Config\Configuration::from_array( array( 'limits' => array( 'storage_work_ms' => 10000, 'events_per_request' => 200, 'events_per_second' => 200 ) ) ) );
+		if ( ! $e2e_storage->schema->ensure() ) {
+			WP_CLI::error( 'Cannot install the StealthAudit tables; nothing was changed.' );
+		}
 		$snapshot = array(
 			'wp_config' => base64_encode( (string) file_get_contents( $e2e_config ) ),
 			'htaccess'  => is_file( ABSPATH . '.htaccess' ) ? base64_encode( (string) file_get_contents( ABSPATH . '.htaccess' ) ) : null,
@@ -160,6 +166,33 @@ switch ( $e2e_action ) {
 		);
 		$e2e_write( $e2e_state, $state );
 		$e2e_configure( $snapshot, $state, array() );
+		// A freshly created site (the compatibility matrix) has too few events for the paging
+		// checks; top it up with synthetic rows through the real repository. They have ids above
+		// the snapshot, so restore deletes them like every other row the run creates.
+		$e2e_existing = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $e2e_table( 'events' ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		if ( $e2e_existing < 120 ) {
+			// Own Storage with raised work/rate budgets: the defaults (100 ms, 25 per request, 60/s) stop
+			// collection after a few dozen inserts by design, which is not what seeding needs.
+			$e2e_events = $e2e_storage->events;
+			for ( $e2e_i = $e2e_existing; $e2e_i < 120; ++$e2e_i ) {
+				$e2e_events->append(
+					array(
+						'actor_id'    => null,
+						'category'    => 'access',
+						'action'      => 'login_failed',
+						'result'      => 'failure',
+						'origin'      => 'cli',
+						'object_type' => 'user',
+						'object_id'   => null,
+						'ip'          => '198.18.0.' . ( 1 + $e2e_i % 200 ), // benchmark range, unused by the checks
+					),
+					time() - 7200 + $e2e_i // ascending: the per-second budget expects a forward clock
+				);
+			}
+			if ( (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $e2e_table( 'events' ) ) ) < 120 ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				WP_CLI::error( 'Could not seed synthetic events; run teardown and restore.' );
+			}
+		}
 		WP_CLI::success( 'Fixture ready.' );
 		break;
 

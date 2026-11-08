@@ -16,6 +16,7 @@ final class DiagnosticsTest extends PHPUnit\Framework\TestCase {
 	private string $prefix;
 
 	protected function setUp(): void {
+		stealthaudit_tests_commit_global_connection();
 		$this->connection = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 		$this->prefix = 'sa_diag_' . bin2hex( random_bytes( 4 ) ) . '_';
 		$this->connection->set_prefix( $this->prefix );

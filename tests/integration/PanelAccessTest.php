@@ -7,6 +7,7 @@ use StealthAudit\Security\SecretCipher;
 use StealthAudit\Security\TotpProvider;
 use StealthAudit\Security\WordPressSession;
 use StealthAudit\Security\AttemptLimiter;
+use StealthAudit\Security\AttemptsExhausted;
 use StealthAudit\Storage\Database;
 use StealthAudit\Storage\Storage;
 
@@ -27,6 +28,7 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 	private array $server;
 
 	protected function setUp(): void {
+		stealthaudit_tests_commit_global_connection();
 		$this->cookies = $_COOKIE;
 		$this->server = $_SERVER;
 		$this->now = time();
@@ -216,6 +218,50 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 1, $this->storage->state->get( 'limit:' . hash( 'sha256', 'mfa:account:' . $this->user ), $this->now + 300 )['payload']['count'] );
 	}
 
+	public function test_shared_nat_origin_limits_every_account_behind_it_but_not_other_origins(): void {
+		$limiter = new AttemptLimiter( $this->storage->state );
+		// 100 different accounts behind one NAT address fill the origin window together.
+		for ( $i = 1; $i <= 100; ++$i ) { $limiter->consume( 700000 + $i, '198.51.100.7', $this->now ); }
+		foreach ( array( $this->user, 800001 ) as $account ) {
+			try { $limiter->consume( $account, '198.51.100.7', $this->now ); self::fail( 'Shared origin must be exhausted.' ); } catch ( AttemptsExhausted $exhausted ) { self::assertSame( 'Panel authentication unavailable.', $exhausted->getMessage() ); }
+		}
+		// The same accounts from another origin are not blocked by the NAT bucket.
+		$limiter->consume( $this->user, '198.51.100.8', $this->now );
+		$limiter->consume( 800001, null, $this->now );
+		self::assertSame( 100, $this->limit_count( 'origin:198.51.100.7' ) );
+		// The account slot of the denied attempts stays consumed (no refund), as documented.
+		self::assertSame( 2, $this->limit_count( 'account:' . $this->user ) );
+	}
+
+	public function test_two_real_processes_never_exceed_a_shared_origin_window(): void {
+		// 160 attempts from 160 distinct accounts behind one origin, split across two processes.
+		$plans = array();
+		for ( $p = 0; $p < 2; ++$p ) {
+			for ( $i = 0; $i < 80; ++$i ) { $plans[ $p ][] = array( 710000 + $p * 1000 + $i, '198.51.100.9' ); }
+		}
+		$outcomes = $this->limiter_workers( $plans );
+		$ok = $outcomes[0]['ok'] + $outcomes[1]['ok'];
+		self::assertSame( 160, array_sum( $outcomes[0] ) + array_sum( $outcomes[1] ) );
+		self::assertLessThanOrEqual( 100, $ok );
+		// Every accepted attempt is counted exactly once: no lost update, no phantom slot.
+		self::assertSame( $ok, $this->limit_count( 'origin:198.51.100.9' ) );
+		self::assertGreaterThan( 0, $outcomes[0]['exhausted'] + $outcomes[1]['exhausted'] );
+		if ( 100 === $ok ) {
+			$this->expectException( AttemptsExhausted::class );
+			( new AttemptLimiter( $this->storage->state ) )->consume( 719999, '198.51.100.9', $this->now );
+		}
+	}
+
+	public function test_two_real_processes_never_exceed_one_account_window(): void {
+		// One account, 2 x 8 attempts from two different origins: only the account window applies.
+		$outcomes = $this->limiter_workers( array( array_fill( 0, 8, array( $this->user, '198.51.100.20' ) ), array_fill( 0, 8, array( $this->user, '198.51.100.21' ) ) ) );
+		$ok = $outcomes[0]['ok'] + $outcomes[1]['ok'];
+		self::assertLessThanOrEqual( 10, $ok );
+		self::assertSame( $ok, $this->limit_count( 'account:' . $this->user ) );
+		self::assertSame( $ok, $this->limit_count( 'origin:198.51.100.20' ) + $this->limit_count( 'origin:198.51.100.21' ) );
+		self::assertGreaterThan( 0, $outcomes[0]['exhausted'] + $outcomes[1]['exhausted'] );
+	}
+
 	public function test_wrong_key_corrupt_state_and_backend_failure_deny_existing_proof(): void {
 		$this->enroll();
 		self::assertFalse( $this->service( null, new SecretCipher( str_repeat( 'x', 32 ), 'synthetic-test-key', 'synthetic-test-installation' ) )->authorized() );
@@ -402,6 +448,39 @@ final class PanelAccessTest extends PHPUnit\Framework\TestCase {
 		}
 		self::assertTrue( $fired );
 		return $result;
+	}
+
+	private function limit_count( string $identity ): int {
+		$row = $this->storage->state->get( 'limit:' . hash( 'sha256', 'mfa:' . $identity ), $this->now );
+		return null === $row ? 0 : $row['payload']['count'];
+	}
+
+	/**
+	 * Run one limiter worker per plan concurrently and return each worker's outcome counts.
+	 *
+	 * @param list<list<array{0:int,1:?string}>> $plans Attempts per process.
+	 * @return list<array{ok:int,exhausted:int,unavailable:int}>
+	 */
+	private function limiter_workers( array $plans ): array {
+		$children = array();
+		foreach ( $plans as $attempts ) {
+			$process = proc_open( array( PHP_BINARY, dirname( __DIR__ ) . '/fixtures/limiter-worker.php' ), array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes );
+			self::assertIsResource( $process );
+			fwrite( $pipes[0], json_encode( array( 'db_user' => DB_USER, 'db_password' => DB_PASSWORD, 'db_name' => DB_NAME, 'db_host' => DB_HOST, 'prefix' => $this->prefix, 'now' => $this->now, 'attempts' => $attempts ) ) . "\n" );
+			stream_set_timeout( $pipes[1], 60 );
+			self::assertSame( "ready\n", fgets( $pipes[1] ) );
+			$children[] = array( $process, $pipes );
+		}
+		foreach ( $children as [ $process, $pipes ] ) { fwrite( $pipes[0], "go\n" ); fclose( $pipes[0] ); }
+		$results = array();
+		foreach ( $children as [ $process, $pipes ] ) {
+			$results[] = json_decode( stream_get_contents( $pipes[1] ), true, 4, JSON_THROW_ON_ERROR );
+			$error = stream_get_contents( $pipes[2] );
+			fclose( $pipes[1] ); fclose( $pipes[2] );
+			self::assertSame( 0, proc_close( $process ), $error );
+			self::assertSame( '', $error );
+		}
+		return $results;
 	}
 
 	private function workers( string $mode, string $code ): array {

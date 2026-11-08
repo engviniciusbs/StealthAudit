@@ -22,6 +22,10 @@ const OUT = join(ROOT, 'artifacts/e2e');
 const RENDER = join(OUT, 'render');
 const SHOTS = join(OUT, 'shots');
 const BASE = 'https://localhost:8443';
+// The compatibility matrix (tools/matrix.mjs) points the run at its own isolated environment;
+// by default this is the wp-env test environment on 8880.
+const ENV_PREFIX = process.env.STEALTHAUDIT_E2E_ENV || 'wp-env-stealthaudit-tests';
+const HTTP_PORT = Number(process.env.STEALTHAUDIT_E2E_HTTP_PORT || 8880);
 const WIDTHS = [320, 375, 768, 1280, 1920];
 const results = [];
 let last = 0;
@@ -29,8 +33,8 @@ let usedStep = 0;
 
 // ---------- infrastructure ----------
 function container() {
-  const names = execFileSync('docker', ['ps', '--filter', 'name=wp-env-stealthaudit-tests', '--format', '{{.Names}}']).toString().split(/\s+/);
-  const cli = names.find((n) => /-cli-\d+$/.test(n));
+  const names = execFileSync('docker', ['ps', '--filter', `name=${ENV_PREFIX}`, '--format', '{{.Names}}']).toString().split(/\s+/);
+  const cli = names.find((n) => n.startsWith(`${ENV_PREFIX}-`) && /-cli-\d+$/.test(n));
   if (!cli) throw new Error('wp-env test environment is not running (npm run env:test:start)');
   return cli;
 }
@@ -115,7 +119,11 @@ function api(page, method, route, { body, params, nonce, restNonce, headers } = 
   }, { method, route, body, params, nonce, restNonce, headers });
 }
 function listing(page, kind) {
-  return page.waitForResponse((r) => decodeURIComponent(r.url()).includes(`/stealthaudit/v1/${kind}`) && r.request().method() === 'GET');
+  const response = page.waitForResponse((r) => decodeURIComponent(r.url()).includes(`/stealthaudit/v1/${kind}`) && r.request().method() === 'GET');
+  // A step that fails before awaiting it must not leave an unhandled rejection that kills the
+  // process before the finally block restores the site; awaiting it still rejects normally.
+  response.catch(() => {});
+  return response;
 }
 async function readQr(page) {
   const box = page.locator('[data-sa-qr]');
@@ -255,7 +263,7 @@ try {
   fixture('setup');
   const state = JSON.parse(readFileSync(join(OUT, 'state.json'), 'utf8'));
   const { operator, second, outsider } = state.users;
-  proxy = await startProxy();
+  proxy = await startProxy({ upstream: { host: '127.0.0.1', port: HTTP_PORT } });
   attacker = await startAttacker({ target: BASE });
   browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }) });
   const newContext = () => browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 }, locale: 'pt-BR' });
@@ -272,7 +280,7 @@ try {
   };
 
   await step('TLS proxy: self-signed loopback certificate; WordPress sees HTTPS only through it', async () => {
-    const plain = await req.get('http://localhost:8880/?stealthaudit=panel', { maxRedirects: 0 });
+    const plain = await req.get(`http://localhost:${HTTP_PORT}/?stealthaudit=panel`, { maxRedirects: 0 });
     check(plain.status() === 403 && (await plain.text()).includes('HTTPS obrigatório') && plain.headers()['cache-control'].includes('no-store'), `plain HTTP gave ${plain.status()}`);
     const secure = await req.get(panelUrl(), { maxRedirects: 0 });
     check(secure.status() === 302, `HTTPS anonymous gave ${secure.status()}`);

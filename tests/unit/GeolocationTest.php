@@ -17,7 +17,7 @@ use StealthAudit\Geo\Geolocation;
 final class GeolocationTest extends TestCase {
 	private const DAY = 86400;
 	private string $source;
-	private string $dir;
+	private string $dir = '';
 	private int $opens = 0;
 
 	protected function setUp(): void {
@@ -30,6 +30,9 @@ final class GeolocationTest extends TestCase {
 	}
 
 	protected function tearDown(): void {
+		if ( '' === $this->dir || ! is_dir( $this->dir ) ) {
+			return; // setUp failed before creating the directory; report only that failure.
+		}
 		foreach ( glob( $this->dir . '/*' ) ?: array() as $file ) {
 			unlink( $file );
 		}

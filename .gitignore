@@ -16,6 +16,7 @@
 !.env.example
 /.wp-env.override.json
 /.wp-env.*.override.json
+/.wp-env.matrix-*.json
 /config/local.php
 /config/stealthaudit.php
 *.key

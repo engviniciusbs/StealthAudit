@@ -28,12 +28,14 @@ final class AuditTest extends WP_UnitTestCase {
 		$this->connection->set_prefix( 'sa_audit_' . bin2hex( random_bytes( 4 ) ) . '_' );
 		$this->db = new Database( $this->connection );
 		global $wpdb;
+		// WP's per-test CREATE TEMPORARY TABLE filter hides DDL from the isolated writer. Remove it
+		// before the options copy too: MySQL (unlike MariaDB) cannot reopen a TEMPORARY table, so
+		// the schema's INSERT ... SELECT lease publish on the same table would fail there.
+		remove_filter( 'query', array( $this, '_create_temporary_tables' ) );
+		remove_filter( 'query', array( $this, '_drop_temporary_tables' ) );
 		$this->db->execute( 'CREATE TABLE %i LIKE %i', $this->connection->options, $wpdb->options );
 		$config = Configuration::from_array( array( 'limits' => array( 'storage_work_ms' => 10000, 'events_per_request' => 200, 'events_per_second' => 200 ) ) );
 		$this->storage = new Storage( $this->connection, $config );
-		// WP's per-test CREATE TEMPORARY TABLE filter hides DDL from the isolated writer.
-		remove_filter( 'query', array( $this, '_create_temporary_tables' ) );
-		remove_filter( 'query', array( $this, '_drop_temporary_tables' ) );
 		$original = $wpdb;
 		try {
 			$wpdb = $this->connection;

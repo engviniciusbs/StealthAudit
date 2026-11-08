@@ -43,6 +43,7 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 	private array $responses = array();
 
 	protected function setUp(): void {
+		stealthaudit_tests_commit_global_connection();
 		global $wp_rest_server, $wpdb;
 		$this->cookies = $_COOKIE;
 		$this->server = $_SERVER;
