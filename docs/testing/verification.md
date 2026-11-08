@@ -73,7 +73,7 @@ Suporte declarado somente para as combinações aprovadas acima. MySQL 8.0 não 
 
 ## Itens herdados
 
-- **Limitador NAT / dois processos** (pendência da fase 5): `PanelAccessTest::test_shared_nat_origin_limits_every_account_behind_it_but_not_other_origins` (100 contas distintas atrás de uma origem esgotam a janela de origem; a 101ª e outra conta da mesma origem recebem `AttemptsExhausted`; as mesmas contas por outra origem ou origem desconhecida passam; a reserva de conta das tentativas negadas continua contada, sem reembolso). `test_two_real_processes_never_exceed_a_shared_origin_window`: dois processos PHP reais, 160 contas, mesma origem → exatamente 100 aceitas (50/50 observado), contador persistido igual ao total aceito (sem atualização perdida) e a próxima tentativa esgotada. `test_two_real_processes_never_exceed_one_account_window`: mesma conta, 2 × 8 tentativas por origens diferentes → no máximo 10, contadores iguais aos aceitos. Worker: `tests/fixtures/limiter-worker.php`.
+- **Limitador NAT / dois processos** (pendência da fase 5): `PanelAccessTest::test_shared_nat_origin_limits_every_account_behind_it_but_not_other_origins` (100 contas distintas atrás de uma origem esgotam a janela de origem; a 101ª e outra conta da mesma origem recebem `AttemptsExhausted`; as mesmas contas por outra origem ou origem desconhecida passam; a reserva de conta das tentativas negadas continua contada, sem reembolso). `test_two_real_processes_never_exceed_a_shared_origin_window`: dois processos PHP reais, 160 contas, mesma origem → exatamente 100 aceitas (50/50 observado), contador persistido igual ao total aceito (sem atualização perdida) e a próxima tentativa esgotada. `test_two_real_processes_never_exceed_one_account_window`: mesma conta, 2 × 8 tentativas por origens diferentes → no máximo 10, contadores iguais aos aceitos. (Fase 8b: o plano passou a 2 × 32 e os dois testes provam a sobreposição dos workers, ver abaixo.) Worker: `tests/fixtures/limiter-worker.php`.
 - 7b: `GeolocationTest` inicializa `$dir = ''` e o `tearDown` retorna cedo se o `setUp` falhou; `tools/geoip-test-data.mjs` usa `AbortSignal.timeout(30 s)` por arquivo; [local-setup.md](local-setup.md) registra que a primeira execução precisa de rede.
 - Prefixo/collation alternativos (pendência da fase 2): ver linhas "alt" da tabela.
 
@@ -84,3 +84,34 @@ Depois de todas as correções, no ambiente de testes original (PHP 8.3.36, Mari
 ## Limpeza
 
 Cada combinação terminou com `wp-env destroy --force` (contêineres, volumes, rede e imagens construídas). Ao final não restou contêiner, volume ou config `.wp-env.matrix-*.json`; as imagens base com tag exata baixadas (wordpress 7.1.4-php8.x, cli-2.12.0-php8.x, mysql:8.4.13, mariadb:10.11.19) continuam no cache local do Docker.
+
+# Fase 8b: desempenho, concorrência e injeção de falhas
+
+Executado em 2026-11-08. Números, metodologia e limites em [performance.md](performance.md); aqui ficam os comandos, o que mudou nas suítes e a execução final.
+
+## Comandos
+
+```text
+npm run benchmark          # ambiente adicional tag=bench na porta 8882, destruído ao final
+npm run test:concurrency   # composer test:concurrency = phpunit --group concurrency (8880)
+```
+
+- `test:concurrency` (pendência M10 da revisão 8a) roda os testes com processos PHP reais — CAS e capacidade (`StorageTest`), lease e migração disputadas, pendente recente e `create()` travado (`MaintenanceTest`), limitador NAT/conta e vencedor único de TOTP/recovery (`PanelAccessTest`) — e todos os cenários de `FaultInjectionTest`. Eles continuam também em `test:integration`.
+- `benchmark` reaproveita `tools/wp-env.cjs --matrix=…` com a nova opção `tag=<palavra>`, que só dá nome próprio ao ambiente (`php83-mariadb101119-bench`), sem compartilhar contêineres ou volumes com uma execução da matriz.
+
+## Itens herdados da revisão 8a
+
+- **M4** — os workers do limitador registram `hrtime` (CLOCK_MONOTONIC, comparável entre processos do mesmo host) da primeira e da última chamada, e os dois testes de dois processos afirmam que os intervalos se cruzam; o plano da conta passou de 2 × 8 para 2 × 32 tentativas para que a sobreposição seja demonstrável. Três execuções seguidas do grupo passaram. `unavailable` (três CAS perdidas, falha fechada) é permitido e somado no total de tentativas.
+- **M3** — `tools/matrix.mjs` e `tests/e2e/run.mjs` escolhem o contêiner pelo nome exato do projeto Compose (`^<projeto>-[0-9a-f]{8}-<serviço>-1$`), não por prefixo.
+- **M7** — a etapa e2e da matriz reprova diagnósticos PHP vindos de `/mu-plugins/stealthaudit` na saída do roteiro (a fixture roda no WP-CLI com `display_errors=stderr`), como já fazia com o log do Apache; o ruído do phar do WP-CLI só é relatado.
+- **M9** — `AuditTest` não troca mais o `$wpdb` global em volta de `ensure()`; o próprio `Schema::install()` faz isso.
+- M1, M2, M5, M6 e M8 (precisão da documentação da matriz) ficam para a fase 8d, como registrado no ledger.
+
+## Observações sobre o ambiente de testes de 8880
+
+- Durante o desenvolvimento do worker de falhas, duas execuções dele ainda carregavam o StealthAudit do próprio site, que gravou 8 linhas (18 ocorrências: avisos `mysqli_real_connect` das reconexões recusadas e avisos sintéticos da tempestade) na tabela de erros real do site. Foram apagadas e os contadores `budget:errors` restaurados (linhas 56 → 38, bytes 15.396 → 11.519); só o `AUTO_INCREMENT` e a revisão do orçamento avançaram. O worker agora define `STEALTHAUDIT_BOOT_STATUS` antes do `wp-load.php` e carrega o autoload por conta própria.
+- Toda execução de `test:integration`/`test:concurrency` reinstala a biblioteca de testes do WordPress, e o StealthAudit do site registra esses eventos (`users/created`, `content/deleted`, …) na tabela de auditoria real, assim como o teste de fatal em processo filho (`diagnostics-worker.php`) grava um `fatal` na tabela de erros real. Isso já acontecia antes desta fase e é efeito das suítes padrão, não do benchmark.
+
+## Suítes finais no ambiente original (8880), fase 8b
+
+Depois do benchmark (ambiente adicional já destruído), sem carga concorrente, PHP 8.3.36 / MariaDB 10.11.19: `npm run test:unit` 214 testes, 649 asserções, 1 skip; `npm run test:integration` 90 testes, 3.017 asserções (83 anteriores + 7 de injeção de falhas); `npm run test:concurrency` 15 testes, 222 asserções; `npm run quality` sem erros (lint agora inclui `benchmarks/`, WPCS/PHPCompatibilityWP, PHPStan nível 6); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
