@@ -270,6 +270,7 @@ final class PanelAccess {
 	 * @param string   $nonce CSRF nonce.
 	 * @param \Closure $operation Validated mutation callback.
 	 * @return mixed Service result.
+	 * @throws AttemptsExhausted When the attempt window is full (still a denial).
 	 * @throws \RuntimeException On any policy, storage, crypto or contention failure.
 	 */
 	private function mutate( string $action, #[\SensitiveParameter] string $nonce, #[\SensitiveParameter] \Closure $operation ): mixed {
@@ -287,6 +288,10 @@ final class PanelAccess {
 		} catch ( \Throwable $failure ) {
 			if ( null !== $identity ) {
 				$this->audit?->emit( 'access', $action, 'user', $identity['user'], 'failure', array(), $identity['user'] );
+			}
+			// Same opaque message; only the type tells transport to answer "try later".
+			if ( $failure instanceof AttemptsExhausted ) {
+				throw new AttemptsExhausted( 'Panel authentication denied.' );
 			}
 			throw new \RuntimeException( 'Panel authentication denied.' );
 		}

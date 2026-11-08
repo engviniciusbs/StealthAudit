@@ -1,6 +1,6 @@
 <?php
 /**
- * Panel page controller: transport, login redirect and placeholder template.
+ * Panel page controller: transport, login redirect and the operator template.
  *
  * @package StealthAudit
  */
@@ -12,7 +12,7 @@ use StealthAudit\Config\Configuration;
 use StealthAudit\Security\PanelAccess;
 use StealthAudit\Security\WordPressSession;
 
-/** No log data is rendered here; the page only bootstraps the authorized API. */
+/** No log data, QR or recovery code is rendered here; the page only bootstraps the authorized API. */
 final class Panel {
 	private const VIEWS = array( 'audit', 'errors' );
 
@@ -41,17 +41,17 @@ final class Panel {
 	 */
 	public function respond( string $method, array $query ): Response {
 		if ( ! in_array( $method, array( 'GET', 'HEAD' ), true ) ) {
-			return self::page( 405, 'Método não permitido.', array( 'Allow' => 'GET, HEAD' ) );
+			return self::page( 405, __( 'Método não permitido.', 'stealthaudit' ), array( 'Allow' => 'GET, HEAD' ) );
 		}
 		if ( ! is_ssl() ) {
-			return self::page( 403, 'HTTPS obrigatório.' );
+			return self::page( 403, __( 'HTTPS obrigatório.', 'stealthaudit' ) );
 		}
 		$user = get_current_user_id();
 		if ( $user < 1 ) {
 			return $this->login( $query );
 		}
 		if ( ! $this->configuration->allows_user( $user ) ) {
-			return self::page( 403, 'Acesso negado.' );
+			return self::page( 403, __( 'Acesso negado.', 'stealthaudit' ) );
 		}
 		try {
 			$this->sessions->current( $this->configuration );
@@ -64,9 +64,10 @@ final class Panel {
 			$status = 'denied';
 		}
 		if ( 'denied' === $status ) {
-			return self::page( 503, 'Painel indisponível.' );
+			// The operator is identified, so the local stylesheet may be served.
+			return self::page( 503, __( 'Painel indisponível. O armazenamento, a chave ou a configuração do StealthAudit não estão prontos; consulte o operador do servidor.', 'stealthaudit' ), array(), $this->urls );
 		}
-		return $this->render( $status, self::preserved( $query ) );
+		return $this->render( $status, $query );
 	}
 
 	/**
@@ -76,17 +77,43 @@ final class Panel {
 	 * @return array<string,string> Safe view parameters.
 	 */
 	public static function preserved( array $query ): array {
-		$view = $query['view'] ?? 'audit';
-		if ( ! is_string( $view ) || ! in_array( $view, self::VIEWS, true ) ) {
+		$parsed = self::parse( $query );
+		if ( null === $parsed ) {
 			return array();
 		}
+		return array( 'view' => $parsed['view'] ) + ( $parsed['valid'] ? $parsed['filters'] : array() );
+	}
+
+	/**
+	 * Validate the view and its filters once; empty form fields mean "not set".
+	 *
+	 * @param array<mixed> $query Raw query.
+	 * @return array{view:string,filters:array<string,string>,cursor:?string,valid:bool}|null Null for an unknown view.
+	 */
+	private static function parse( array $query ): ?array {
+		$view = $query['view'] ?? 'audit';
+		if ( ! is_string( $view ) || ! in_array( $view, self::VIEWS, true ) ) {
+			return null;
+		}
 		unset( $query['view'], $query[ Urls::QUERY_VAR ] );
+		// A GET filter form without script submits blank fields; they are absent, not malformed.
+		$query = array_filter( $query, static fn ( mixed $value ): bool => '' !== $value );
 		try {
 			$filters = 'audit' === $view ? Filters::events( $query ) : Filters::errors( $query );
 		} catch ( \InvalidArgumentException $failure ) {
-			return array( 'view' => $view );
+			return array(
+				'view'    => $view,
+				'filters' => array(),
+				'cursor'  => null,
+				'valid'   => false,
+			);
 		}
-		return array( 'view' => $view ) + $filters['query'];
+		return array(
+			'view'    => $view,
+			'filters' => $filters['query'],
+			'cursor'  => Filters::cursor( $filters['after'] ),
+			'valid'   => true,
+		);
 	}
 
 	/**
@@ -101,19 +128,50 @@ final class Panel {
 	}
 
 	/**
-	 * Render the placeholder template with escaped values only.
+	 * Render the operator template with escaped values only.
 	 *
-	 * @param string               $status Closed PanelAccess status.
-	 * @param array<string,string> $query Validated view parameters.
+	 * @param string       $status Closed PanelAccess status.
+	 * @param array<mixed> $query Raw query parameters.
 	 */
 	private function render( string $status, array $query ): Response {
+		$parsed  = self::parse( $query ) ?? array(
+			'view'    => 'audit',
+			'filters' => array(),
+			'cursor'  => null,
+			'valid'   => false,
+		);
+		$kept    = self::preserved( $query );
+		$base    = $this->urls->panel();
+		$hidden  = array();
+		$queried = wp_parse_url( $base, PHP_URL_QUERY );
+		if ( is_string( $queried ) ) {
+			parse_str( $queried, $hidden );
+		}
+		$assets = array();
+		foreach ( array_keys( Assets::FILES ) as $file ) {
+			$assets[ $file ] = $this->urls->asset( $file );
+		}
 		$view = array(
 			'status'     => $status,
-			'panel'      => $this->urls->panel(),
+			'panel'      => $base,
 			'rest'       => $this->urls->rest(),
 			'nonce'      => wp_create_nonce( 'stealthaudit' ),
 			'rest_nonce' => wp_create_nonce( 'wp_rest' ),
-			'query'      => $query,
+			'login'      => $this->urls->login( $kept ),
+			'query'      => $kept,
+			'view'       => $parsed['view'],
+			'filters'    => $parsed['filters'],
+			'cursor'     => $parsed['cursor'],
+			'invalid'    => ! $parsed['valid'],
+			'tabs'       => array(
+				'audit'  => $this->urls->panel( array( 'view' => 'audit' ) ),
+				'errors' => $this->urls->panel( array( 'view' => 'errors' ) ),
+			),
+			'action'     => explode( '?', $base, 2 )[0],
+			'hidden'     => array_filter( $hidden, 'is_string' ),
+			'assets'     => $assets,
+			'site'       => (string) get_bloginfo( 'name' ),
+			'host'       => (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ),
 		);
 		ob_start();
 		try {
@@ -129,12 +187,21 @@ final class Panel {
 	/**
 	 * Minimal generic status page; message is a fixed literal, still escaped.
 	 *
+	 * Styled only for an identified operator (assets are not served to anyone else).
+	 *
 	 * @param int                  $status HTTP status.
 	 * @param string               $message Generic message.
 	 * @param array<string,string> $extra Additional headers.
+	 * @param Urls|null            $styled Asset URLs when the operator is identified.
 	 */
-	private static function page( int $status, string $message, array $extra = array() ): Response {
-		$body = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>StealthAudit</title></head><body><main><h1>StealthAudit</h1><p>' . esc_html( $message ) . '</p></main></body></html>';
+	private static function page( int $status, string $message, array $extra = array(), ?Urls $styled = null ): Response {
+		$links = '';
+		if ( null !== $styled ) {
+			foreach ( array( 'tokens.css', 'base.css', 'panel.css' ) as $file ) {
+				$links .= '<link rel="stylesheet" href="' . esc_url( $styled->asset( $file ) ) . '">'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Standalone status page outside the theme.
+			}
+		}
+		$body = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>StealthAudit</title>' . $links . '</head><body><main class="container screen"><section class="auth"><h1>StealthAudit</h1><p>' . esc_html( $message ) . '</p></section></main></body></html>';
 		return new Response( $status, Headers::page() + $extra, $body );
 	}
 }

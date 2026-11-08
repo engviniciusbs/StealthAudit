@@ -46,6 +46,21 @@ final class Urls {
 	}
 
 	/**
+	 * Local stylesheet or script served by the router (same origin, even with a CDN content URL).
+	 *
+	 * @param string $file Name from the closed Assets list.
+	 */
+	public function asset( string $file ): string {
+		return add_query_arg(
+			array(
+				self::QUERY_VAR => 'asset',
+				'file'          => rawurlencode( $file ),
+			),
+			home_url( '/' )
+		);
+	}
+
+	/**
 	 * Same-origin REST base for the panel.
 	 *
 	 * @param string $route Route below the namespace.

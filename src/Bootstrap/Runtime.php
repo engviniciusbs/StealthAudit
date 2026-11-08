@@ -22,6 +22,7 @@ use StealthAudit\Audit\Upgrades;
 use StealthAudit\Diagnostics\Collector;
 use StealthAudit\Diagnostics\Normalizer;
 use StealthAudit\Http\Api;
+use StealthAudit\Http\Assets;
 use StealthAudit\Http\Guard;
 use StealthAudit\Http\Panel;
 use StealthAudit\Http\Router;
@@ -158,7 +159,7 @@ final class Runtime {
 		$access                 = fn (): PanelAccess => $this->panel_access();
 		$clock                  = static fn (): int => time();
 		$panel                  = new Panel( $this->configuration, $urls, $access, dirname( __DIR__, 2 ) . '/templates/panel.php' );
-		( new Router( $urls, $panel, fn () => $this->storage()->state, $clock ) )->register();
+		( new Router( $urls, $panel, fn () => $this->storage()->state, $clock, new Assets( $this->configuration, dirname( __DIR__, 2 ) . '/assets' ) ) )->register();
 		( new Api( new Guard( $this->configuration, $access, $urls ), fn (): Storage => $this->storage(), fn (): array => $this->diagnostic_health(), $this->configuration, $clock ) )->register();
 	}
 

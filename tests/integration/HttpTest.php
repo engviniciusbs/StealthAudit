@@ -5,6 +5,7 @@ declare(strict_types=1);
 use StealthAudit\Audit\Context;
 use StealthAudit\Config\Configuration;
 use StealthAudit\Http\Api;
+use StealthAudit\Http\Assets;
 use StealthAudit\Http\Guard;
 use StealthAudit\Http\Panel;
 use StealthAudit\Http\Router;
@@ -418,6 +419,191 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 			$wp_rewrite->set_permalink_structure( $structure );
 			update_option( 'rewrite_rules', $rules );
 		}
+	}
+
+	public function test_panel_renders_each_mfa_state_without_secrets_or_external_assets(): void {
+		$hostile = static fn (): string => '<script>alert("site")</script>&\'';
+		add_filter( 'pre_option_blogname', $hostile );
+		try {
+			$panel = $this->panel();
+			$page = $panel->respond( 'GET', array( 'view' => 'errors', 'severity' => 'fatal' ) );
+			$this->assert_page( $page, 'password_required', array( 'password' ) );
+			self::assertStringNotContainsString( '<script>alert', $page->body );
+			self::assertStringContainsString( '&lt;script&gt;alert(&quot;site&quot;)&lt;/script&gt;&amp;', $page->body );
+			self::assertStringContainsString( 'autocomplete="current-password"', $page->body );
+			self::assertStringContainsString( 'id="sa-h-session"', $page->body );
+			self::assertDoesNotMatchRegularExpression( '/data-sa-chrome|data-sa-records/', $page->body );
+
+			self::assertSame( 200, $this->call( 'POST', '/reconfirm', array(), array( 'password' => self::PASSWORD ) )->get_status() );
+			$this->assert_page( $panel->respond( 'GET', array() ), 'enrollment_required', array( 'enroll' ) );
+
+			$qr = $this->call( 'POST', '/enrollment/begin', array(), array() )->get_data()['qr'];
+			self::assertStringContainsString( '<svg', $qr );
+			$pending = $panel->respond( 'GET', array() );
+			$this->assert_page( $pending, 'enrollment_pending', array( 'setup' ) );
+			self::assertStringContainsString( 'inputmode="numeric"', $pending->body );
+			self::assertStringContainsString( 'autocomplete="one-time-code"', $pending->body );
+			// One TOTP field per form, never six single-digit boxes.
+			self::assertSame( 1, substr_count( $pending->body, 'name="code"' ) );
+
+			$codes = $this->call( 'POST', '/enrollment/confirm', array(), array( 'code' => $this->code() ) )->get_data()['recovery_codes'];
+			self::assertCount( 10, $codes );
+			$authorized = $panel->respond( 'GET', array( 'view' => 'errors', 'severity' => 'fatal', 'limit' => '25', 'from' => '' ) );
+			$this->assert_page( $authorized, 'authorized', array( 'workspace' ) );
+			foreach ( $codes as $code ) {
+				self::assertStringNotContainsString( $code, $authorized->body );
+			}
+			self::assertStringContainsString( 'aria-current="page">Erros</a>', $authorized->body );
+			self::assertStringContainsString( '<option value="fatal" selected=\'selected\'>Fatal</option>', $authorized->body );
+			self::assertStringContainsString( 'data-filters="{&quot;severity&quot;:&quot;fatal&quot;,&quot;limit&quot;:&quot;25&quot;}"', $authorized->body );
+			self::assertStringContainsString( 'Horários em UTC.', $authorized->body );
+			self::assertStringContainsString( 'data-state="idle"', $authorized->body );
+			self::assertStringContainsString( 'Registros indisponíveis sem JavaScript', $authorized->body );
+			self::assertStringNotContainsString( 'role="alert"', $authorized->body );
+			// The filter form works without script: a local GET form carrying the route parameters.
+			self::assertMatchesRegularExpression( '/<form class="filters" method="get" action="' . preg_quote( esc_url( explode( '?', $this->urls->panel(), 2 )[0] ), '/' ) . '"/', $authorized->body );
+			self::assertStringContainsString( '<input type="hidden" name="stealthaudit" value="panel">', $authorized->body );
+			// Malformed filters are ignored with a visible notice and never echoed back.
+			$invalid = $panel->respond( 'GET', array( 'view' => 'audit', 'ip' => '<b>x</b>' ) );
+			$this->assert_page( $invalid, 'authorized', array( 'workspace' ) );
+			self::assertStringContainsString( 'role="alert"', $invalid->body );
+			self::assertStringNotContainsString( '<b>x', $invalid->body );
+			self::assertStringNotContainsString( '&lt;b&gt;x', $invalid->body );
+			self::assertStringContainsString( 'data-filters="{}"', $invalid->body );
+
+			self::assertSame( 'challenge_required', $this->call( 'POST', '/revoke', array(), array() )->get_data()['status'] );
+			$challenge = $panel->respond( 'GET', array( 'view' => 'audit', 'result' => 'failure' ) );
+			$this->assert_page( $challenge, 'challenge_required', array( 'challenge' ) );
+			self::assertStringContainsString( 'falta só verificar o StealthAudit', $challenge->body );
+			self::assertStringContainsString( 'Os filtros do endereço serão aplicados depois da verificação.', $challenge->body );
+			self::assertStringContainsString( 'name="recovery_code"', $challenge->body );
+
+			// Abandoned factor replacement past its pending window: offline reset only.
+			$this->now += 30;
+			self::assertSame( 200, $this->call( 'POST', '/authenticate', array(), array( 'code' => $this->code() ) )->get_status() );
+			$this->now += 30;
+			self::assertSame( 200, $this->call( 'POST', '/replace-factor', array(), array( 'password' => self::PASSWORD, 'code' => $this->code() ) )->get_status() );
+			$this->now += 601;
+			$locked = $panel->respond( 'GET', array() );
+			$this->assert_page( $locked, 'recovery_locked', array( 'locked' ) );
+			self::assertStringNotContainsString( 'data-sa-action', $locked->body );
+		} finally {
+			remove_filter( 'pre_option_blogname', $hostile );
+		}
+	}
+
+	public function test_assets_are_local_private_and_only_for_the_operator(): void {
+		$directory = dirname( __DIR__, 2 ) . '/assets';
+		$assets = new Assets( $this->config, $directory );
+		foreach ( Assets::FILES as $file => $type ) {
+			$response = $assets->respond( 'GET', array( 'file' => $file ) );
+			self::assertSame( 200, $response->status, $file );
+			self::assertSame( $type, $response->headers['Content-Type'] );
+			self::assertSame( 'nosniff', $response->headers['X-Content-Type-Options'] );
+			self::assertStringContainsString( 'no-store', $response->headers['Cache-Control'] );
+			self::assertSame( 'same-origin', $response->headers['Cross-Origin-Resource-Policy'] );
+			self::assertSame( file_get_contents( $directory . '/' . $file ), $response->body );
+			// Nothing remote: no URL scheme, protocol-relative import or font host.
+			self::assertDoesNotMatchRegularExpression( '#https?://|url\(\s*["\']?//|@import|googleapis#i', $response->body, $file );
+			self::assertStringStartsWith( 'http', $this->urls->asset( $file ) );
+			self::assertSame( wp_parse_url( home_url(), PHP_URL_HOST ), wp_parse_url( $this->urls->asset( $file ), PHP_URL_HOST ) );
+		}
+		self::assertMatchesRegularExpression( '/^\/\* Hallmark · shape: app screen/', (string) file_get_contents( $directory . '/panel.css' ) );
+		foreach ( array( array( 'file' => '../composer.json' ), array( 'file' => 'panel.php' ), array( 'file' => array( 'panel.css' ) ), array() ) as $query ) {
+			self::assertSame( 404, $assets->respond( 'GET', $query )->status );
+		}
+		self::assertSame( 405, $assets->respond( 'POST', array( 'file' => 'panel.css' ) )->status );
+		$_SERVER['HTTPS'] = 'off';
+		self::assertSame( 404, $assets->respond( 'GET', array( 'file' => 'panel.css' ) )->status );
+		$_SERVER['HTTPS'] = 'on';
+		$cookie = $_COOKIE[ LOGGED_IN_COOKIE ];
+		$this->login( 'sa_http_other_' );
+		self::assertSame( 404, $assets->respond( 'GET', array( 'file' => 'panel.css' ) )->status );
+		wp_set_current_user( 0 );
+		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		$anonymous = $assets->respond( 'GET', array( 'file' => 'panel.js' ) );
+		self::assertSame( 404, $anonymous->status );
+		self::assertSame( '', $anonymous->body );
+		wp_set_current_user( $this->user );
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie;
+		WP_Session_Tokens::get_instance( $this->user )->destroy( $this->token );
+		self::assertSame( 404, $assets->respond( 'GET', array( 'file' => 'panel.css' ) )->status );
+	}
+
+	public function test_unavailable_panel_page_is_styled_for_the_operator_only(): void {
+		$unavailable = $this->panel( static function (): PanelAccess {
+			throw new RuntimeException( 'Panel unavailable.' );
+		} )->respond( 'GET', array() );
+		self::assertSame( 503, $unavailable->status );
+		self::assertStringContainsString( esc_url( $this->urls->asset( 'panel.css' ) ), $unavailable->body );
+		self::assertStringNotContainsString( 'data-nonce', $unavailable->body );
+		$this->login( 'sa_http_other_' );
+		$forbidden = $this->panel()->respond( 'GET', array() );
+		self::assertSame( 403, $forbidden->status );
+		self::assertStringNotContainsString( 'stylesheet', $forbidden->body );
+	}
+
+	public function test_exhausted_attempts_answer_try_later_and_still_deny(): void {
+		$this->event( $this->now - 5 );
+		for ( $i = 0; $i < 10; ++$i ) {
+			$this->assert_denied( $this->call( 'POST', '/reconfirm', array(), array( 'password' => 'wrong-password' ) ), 403, 'stealthaudit_forbidden' );
+		}
+		// Even the right password is refused while the window is full; no counters or timing leak.
+		$limited = $this->call( 'POST', '/reconfirm', array(), array( 'password' => self::PASSWORD ) );
+		$this->assert_denied( $limited, 429, 'stealthaudit_try_later' );
+		self::assertSame( array( 'status' => 429 ), $limited->get_data()['data'] );
+		self::assertArrayNotHasKey( 'Retry-After', $limited->get_headers() );
+		self::assertSame( 'password_required', $this->call( 'GET', '/status' )->get_data()['status'] );
+		$this->assert_denied( $this->call( 'GET', '/events' ), 401, 'stealthaudit_proof_required' );
+		// The window expires; the state machine continues normally.
+		$this->now += 300;
+		self::assertSame( 'enrollment_required', $this->call( 'POST', '/reconfirm', array(), array( 'password' => self::PASSWORD ) )->get_data()['status'] );
+		$this->assert_private_headers();
+	}
+
+	/**
+	 * Exactly the expected screens are visible; nothing secret is in the HTML.
+	 *
+	 * @param list<string> $visible Visible data-sa-screen keys.
+	 */
+	private function assert_page( \StealthAudit\Http\Response $page, string $status, array $visible ): void {
+		self::assertSame( 200, $page->status );
+		self::assertStringContainsString( 'data-status="' . $status . '"', $page->body );
+		preg_match_all( '/<section[^>]*data-sa-screen="([a-z]+)"[^>]*>/', $page->body, $sections, PREG_SET_ORDER );
+		$shown = array();
+		foreach ( $sections as $section ) {
+			if ( ! preg_match( '/\shidden[\s>]/', $section[0] ) ) {
+				$shown[] = $section[1];
+			}
+		}
+		self::assertSame( $visible, $shown, $status );
+		foreach ( array( '<svg', 'otpauth', 'secret=', 'data:image', 'recovery_codes' ) as $secret ) {
+			self::assertStringNotContainsString( $secret, $page->body );
+		}
+		// Every resource and link is same-origin; no CDN, font host or inline script.
+		preg_match_all( '/(?:src|href|action)="([^"]*)"/', $page->body, $urls );
+		foreach ( $urls[1] as $url ) {
+			$host = wp_parse_url( html_entity_decode( $url ), PHP_URL_HOST );
+			self::assertTrue( null === $host || wp_parse_url( home_url(), PHP_URL_HOST ) === $host, $url );
+		}
+		preg_match_all( '/<script\b([^>]*)>/', $page->body, $scripts );
+		foreach ( $scripts[1] as $attributes ) {
+			self::assertMatchesRegularExpression( '/src="|type="application\/json"/', $attributes );
+		}
+		// Forms that carry credentials are POST + JSON-only and disabled until the script runs.
+		preg_match_all( '/<form\b[^>]*>.*?<\/form>/s', $page->body, $forms );
+		foreach ( $forms[0] as $form ) {
+			if ( str_contains( $form, 'data-sa-action' ) ) {
+				self::assertStringContainsString( 'method="post"', $form );
+				self::assertStringContainsString( '<fieldset disabled data-sa-js>', $form );
+				self::assertDoesNotMatchRegularExpression( '/\saction="/', substr( $form, 0, (int) strpos( $form, '>' ) ) );
+			} else {
+				self::assertStringNotContainsString( 'type="password"', $form );
+			}
+		}
+		self::assertStringContainsString( "script-src 'self'", $page->headers['Content-Security-Policy'] );
+		self::assertStringContainsString( 'no-store', $page->headers['Cache-Control'] );
+		self::assertSame( 1, substr_count( $page->body, 'role="status" aria-live="polite" data-sa-live' ) );
 	}
 
 	private function panel_access(): PanelAccess {

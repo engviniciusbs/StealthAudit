@@ -21,12 +21,14 @@ final class Router {
 	 * @param Panel                      $panel Page controller.
 	 * @param \Closure():StateRepository $state Ready state store or throws.
 	 * @param \Closure():int             $clock UTC clock.
+	 * @param Assets|null                $assets Local stylesheet/script controller.
 	 */
 	public function __construct(
 		private readonly Urls $urls,
 		private readonly Panel $panel,
 		private readonly \Closure $state,
 		private readonly \Closure $clock,
+		private readonly ?Assets $assets = null,
 	) {}
 
 	/** Register hooks at the WordPress lifecycle boundaries. */
@@ -70,11 +72,16 @@ final class Router {
 	 * @param mixed $wp Parsed request.
 	 */
 	public function serve( mixed $wp ): void {
-		if ( ! $wp instanceof \WP || ! $this->matches( $wp ) ) {
+		if ( ! $wp instanceof \WP ) {
+			return;
+		}
+		$asset = null !== $this->assets && 'asset' === ( $wp->query_vars[ Urls::QUERY_VAR ] ?? null );
+		if ( ! $asset && ! $this->matches( $wp ) ) {
 			return;
 		}
 		$method   = isset( $_SERVER['REQUEST_METHOD'] ) && is_string( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( $_SERVER['REQUEST_METHOD'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Compared against a closed method list only.
-		$response = $this->panel->respond( $method, wp_unslash( $_GET ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view filters, strictly validated by Filters.
+		$query    = wp_unslash( $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only view filters or an asset name, strictly validated downstream.
+		$response = $asset ? $this->assets->respond( $method, $query ) : $this->panel->respond( $method, $query );
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
 			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals -- Page-cache plugin convention.
 		}

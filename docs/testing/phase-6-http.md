@@ -1,6 +1,6 @@
 # Rota, API REST e segurança HTTP (fase 6a)
 
-Esta etapa adiciona o transporte HTTP do painel: rota própria, namespace REST `stealthaudit/v1`, política de permissão, cabeçalhos privados e a camada de consulta com filtros validados no servidor. A interface Hallmark/ASCII Terminal é a fase 6b; o template atual (`templates/panel.php`) é um placeholder semântico, sem CSS/JS, que só exibe o estado MFA e os dados necessários para a 6b chamar a API.
+Esta etapa adiciona o transporte HTTP do painel: rota própria, namespace REST `stealthaudit/v1`, política de permissão, cabeçalhos privados e a camada de consulta com filtros validados no servidor. A interface Hallmark/ASCII Terminal que substituiu o placeholder desta etapa está descrita em [phase-6-ui.md](phase-6-ui.md).
 
 ## Composição
 
@@ -8,11 +8,11 @@ Esta etapa adiciona o transporte HTTP do painel: rota própria, namespace REST `
 
 - `Urls`: única geração de URLs. Caminho amigável `home_url(<root><endpoint>/)` com permalinks bonitos (inclui `index.php/` em PATHINFO e respeita WordPress em subdiretório); fallback `/?stealthaudit=panel` com permalinks simples. REST via `rest_url()`; login via `wp_login_url(<retorno local validado>, reauth=1)`. Uma futura opção de subdomínio substituiria somente esta classe; não há CORS nem cookies de subdomínio.
 - `Router`: `add_rewrite_rule(<regex do endpoint>, 'index.php?stealthaudit=panel', 'top')` em `init`, query var pública, atendimento em `parse_request` (antes da consulta principal e do tema, com `exit`). A regra `top` impede que uma página com o mesmo slug sombreie o painel.
-- `Panel`: página. GET/HEAD apenas (405 com `Allow` para o resto); sem HTTPS → 403; sem sessão WordPress (ou sessão revogada/expirada) → 302 para o wp-login existente com `redirect_to` local e somente `view` e filtros validados preservados — parâmetros desconhecidos, como `redirect_to` externo, descartam todos os filtros; usuário fora da allowlist → 403; backend/chave indisponível → 503; caso contrário 200 com o placeholder.
+- `Panel`: página. GET/HEAD apenas (405 com `Allow` para o resto); sem HTTPS → 403; sem sessão WordPress (ou sessão revogada/expirada) → 302 para o wp-login existente com `redirect_to` local e somente `view` e filtros validados preservados — parâmetros desconhecidos, como `redirect_to` externo, descartam todos os filtros; usuário fora da allowlist → 403; backend/chave indisponível → 503; caso contrário 200 com o template do painel (fase 6b).
 - `Guard`: permission callbacks. Ordem: HTTPS (403) → usuário WordPress (401) → allowlist (403) → sessão real `WordPressSession` (401) → `Origin`/`Sec-Fetch-Site` de mesma origem e nonce `stealthaudit` no cabeçalho `X-StealthAudit-Nonce` (403) → em POST, corpo ≤ 8.192 bytes (413) e `application/json` (400) → composição do `PanelAccess` (503). Para dados, ainda `PanelAccess::authorized()` com no máximo duas tentativas; falha → 401 `stealthaudit_proof_required` com o estado MFA fechado, ou 503 quando o próprio estado é `denied` (armazenamento indisponível).
 - `Api`: rotas pequenas, todas com `show_in_index => false` e nenhum `permission_callback` permissivo.
   - `GET /events` (período, `user`, `category`, `action`, `result`, `ip`), `GET /errors` (período, `severity`), ambos exigem prova; `GET /status` exige identidade e devolve `status` e, só com prova válida (sem prolongar idle), o estado de captura.
-  - `POST /reconfirm`, `/enrollment/begin`, `/enrollment/confirm`, `/authenticate`, `/recover`, `/replace-factor`, `/revoke`: corpo JSON com campos fechados e limitados, lidos apenas do corpo (nunca da URL). Repassam o nonce do cabeçalho ao `PanelAccess` (que repete POST + nonce + limite de tentativas). Falha → 403 genérico. Nenhuma devolve logs; `begin/recover/replace` devolvem o SVG do QR e `confirm` os códigos recovery, sempre com `no-store`.
+  - `POST /reconfirm`, `/enrollment/begin`, `/enrollment/confirm`, `/authenticate`, `/recover`, `/replace-factor`, `/revoke`: corpo JSON com campos fechados e limitados, lidos apenas do corpo (nunca da URL). Repassam o nonce do cabeçalho ao `PanelAccess` (que repete POST + nonce + limite de tentativas). Falha → 403 genérico; janela de tentativas cheia → 429 `stealthaudit_try_later` (fase 6b), também sem dados nem contadores. Nenhuma devolve logs; `begin/recover/replace` devolvem o SVG do QR e `confirm` os códigos recovery, sempre com `no-store`.
 
 O cliente precisa enviar dois nonces: `X-WP-Nonce` (`wp_rest`, sem ele o próprio WordPress descarta a autenticação por cookie e a resposta é 401) e `X-StealthAudit-Nonce` (`stealthaudit`). Nenhum substitui a prova MFA.
 
@@ -57,4 +57,4 @@ Smoke HTTP real em `http://localhost:8880` (Apache do wp-env). Sem cabeçalho de
 - Método errado devolve o 404 `rest_no_route` do WordPress, não 405. Erros REST têm mensagens genéricas em inglês; a página usa português.
 - Erros são paginados por `first_seen` sem índice dedicado (varredura limitada pelo teto de linhas de erros); um índice exigiria migração de esquema. Uma ocorrência agregada aparece no período pelo seu primeiro registro da janela de cinco minutos.
 - `dropped` e o contador de linhas do orçamento são cumulativos até a manutenção da fase 7; `suspended` reflete esse contador, não uma contagem física.
-- Browser real, QR escaneado em aplicativo, UI final, acessibilidade e Hallmark ficam para a fase 6b.
+- UI, acessibilidade e Hallmark: ver [phase-6-ui.md](phase-6-ui.md). Browser real ponta a ponta e QR escaneado em aplicativo continuam pendentes.

@@ -21,6 +21,7 @@ final class Guard {
 		401 => array( 'stealthaudit_unauthenticated', 'Authentication required.' ),
 		403 => array( 'stealthaudit_forbidden', 'Access denied.' ),
 		413 => array( 'stealthaudit_too_large', 'Request too large.' ),
+		429 => array( 'stealthaudit_try_later', 'Try again later.' ),
 		503 => array( 'stealthaudit_unavailable', 'Service unavailable.' ),
 	);
 

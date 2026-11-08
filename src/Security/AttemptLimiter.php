@@ -25,6 +25,7 @@ final class AttemptLimiter {
 	 * @param int         $user Authorized user ID.
 	 * @param string|null $ip Canonical trusted origin, null groups unknown peers.
 	 * @param int         $now UTC clock.
+	 * @throws AttemptsExhausted When a window is full (a denial the UI may word as "try later").
 	 * @throws \RuntimeException When attempts/backend are unavailable.
 	 */
 	public function consume( int $user, ?string $ip, int $now ): void {
@@ -32,8 +33,9 @@ final class AttemptLimiter {
 			'account:' . $user               => 10,
 			'origin:' . ( $ip ?? 'unknown' ) => 100,
 		) as $identity => $maximum ) {
-			$key      = 'limit:' . hash( 'sha256', 'mfa:' . $identity );
-			$accepted = false;
+			$key       = 'limit:' . hash( 'sha256', 'mfa:' . $identity );
+			$accepted  = false;
+			$exhausted = false;
 			for ( $attempt = 0; $attempt < 3; ++$attempt ) {
 				$row = $this->state->get( $key, $now );
 				if ( null === $row ) {
@@ -41,7 +43,11 @@ final class AttemptLimiter {
 					$accepted = $this->state->replace_expired( $key, $payload, $now + 300, $now ) || $this->state->create( $key, $payload, $now + 300 );
 				} else {
 					$count = $row['payload']['count'] ?? null;
-					if ( ! is_int( $count ) || $count < 1 || $count >= $maximum || ! is_string( $row['expires_at'] ) ) {
+					if ( is_int( $count ) && $count >= $maximum && is_string( $row['expires_at'] ) ) {
+						$exhausted = true;
+						break;
+					}
+					if ( ! is_int( $count ) || $count < 1 || ! is_string( $row['expires_at'] ) ) {
 						break;
 					}
 					$expires = strtotime( $row['expires_at'] . ' UTC' );
@@ -53,6 +59,9 @@ final class AttemptLimiter {
 				if ( $accepted ) {
 					break;
 				}
+			}
+			if ( $exhausted ) {
+				throw new AttemptsExhausted( 'Panel authentication unavailable.' );
 			}
 			if ( ! $accepted ) {
 				throw new \RuntimeException( 'Panel authentication unavailable.' );

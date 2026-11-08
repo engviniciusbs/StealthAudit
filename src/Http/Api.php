@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace StealthAudit\Http;
 
 use StealthAudit\Config\Configuration;
+use StealthAudit\Security\AttemptsExhausted;
 use StealthAudit\Security\PanelAccess;
 use StealthAudit\Storage\Storage;
 
@@ -194,6 +195,9 @@ final class Api {
 				'replace_factor'     => $access->replace_factor( $arguments[0], $arguments[1], $nonce ),
 				default              => $access->revoke( $nonce ),
 			};
+		} catch ( AttemptsExhausted $failure ) {
+			// Closed "try later": still a denial, no counters or window timing.
+			return Guard::error( 429 );
 		} catch ( \Throwable $failure ) {
 			return Guard::error( 403 );
 		}

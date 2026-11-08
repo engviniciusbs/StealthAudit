@@ -1,0 +1,25 @@
+[
+ {
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "terminal",
+  "axes": "dark/mono/chromatic-green",
+  "hero": "none (app scope)",
+  "nav": "top bar: wordmark block, two tabs, sign-out",
+  "footer": "none",
+  "imagery": "none; functional local QR only",
+  "photos": [],
+  "entry": "templates/panel.php + assets/panel.css",
+  "fingerprint": "app/top-bar/table-first/inline-filters/contained-auth-forms/no-footer",
+  "sections": [
+   "auth screens: password, enroll, setup QR, recovery codes, challenge/expired, recovery, locked, WordPress session ended",
+   "workspace: tabs Auditoria/Erros, inline filters, capture state, ledger table, cursor pager, factor replacement disclosure"
+  ],
+  "signature": "the audit ledger table with ASCII markers",
+  "waived": [],
+  "prompt": "StealthAudit operator panel, Hallmark ASCII Terminal by request, app scope",
+  "verification": "sloplint static assets clean; previews static clean; previews --render 0 FAIL 0 WARN 2 DISMISSED (F25); live --url not run (route requires WordPress login + TOTP)",
+  "date": "2026-11-08",
+  "mode": "build"
+ }
+]
