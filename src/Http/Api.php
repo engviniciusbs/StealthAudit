@@ -15,6 +15,12 @@ use StealthAudit\Storage\Storage;
 
 /** Validation runs after permission checks, so anonymous callers learn nothing. */
 final class Api {
+	/** Runs after core's rest_send_cors_headers, which uses the default priority 10. */
+	public const CORS_PRIORITY = 99;
+
+	/** Core CORS grants that would let another site read our responses with cookies. */
+	public const CORS_HEADERS = array( 'Access-Control-Allow-Origin', 'Access-Control-Allow-Credentials' );
+
 	/**
 	 * POST operations: route => [PanelAccess method, body fields with byte limits].
 	 */
@@ -63,6 +69,8 @@ final class Api {
 		add_filter( 'rest_pre_dispatch', array( $this, 'pre_dispatch' ), 10, 3 );
 		add_filter( 'rest_post_dispatch', array( $this, 'post_dispatch' ), 10, 3 );
 		add_filter( 'rest_pre_serve_request', array( $this, 'pre_serve' ), 10, 3 );
+		// After core's rest_send_cors_headers (priority 10, added on rest_api_init), preflight included.
+		add_filter( 'rest_pre_serve_request', array( $this, 'strip_cors' ), self::CORS_PRIORITY, 3 );
 		add_filter( 'rest_json_encode_options', array( $this, 'json_options' ), 10, 2 );
 	}
 
@@ -149,9 +157,14 @@ final class Api {
 				return Guard::error( 503 );
 			}
 			return self::respond(
-				array(
-					'status'  => $status,
-					'capture' => 'authorized' === $status && $access->authorized( false ) ? $this->capture( ( $this->storage )(), ( $this->clock )() ) : null,
+				'authorized' === $status && $access->authorized( false ) ? array(
+					'status'      => $status,
+					'capture'     => $this->capture( ( $this->storage )(), ( $this->clock )() ),
+					'maintenance' => $this->maintenance( ( $this->storage )(), ( $this->clock )() ),
+				) : array(
+					'status'      => $status,
+					'capture'     => null,
+					'maintenance' => null,
 				)
 			);
 		} catch ( \Throwable $failure ) {
@@ -238,7 +251,7 @@ final class Api {
 	 */
 	public function post_dispatch( mixed $response, mixed $server, mixed $request ): mixed {
 		if ( $response instanceof \WP_HTTP_Response && $request instanceof \WP_REST_Request && self::ours( $request ) ) {
-			$response = self::session_ended( $response );
+			$response = $this->session_ended( $response, $request );
 			foreach ( Headers::private() as $name => $value ) {
 				$response->header( $name, $value );
 			}
@@ -253,13 +266,17 @@ final class Api {
 	 * cookie check rejects the X-WP-Nonce as 403 rest_cookie_invalid_nonce before any
 	 * permission callback runs. The panel must then offer the WordPress login (401), not a
 	 * reload. A valid cookie with a stale nonce keeps core's 403. Either way it is a denial.
+	 * Only same-origin (or Origin-less) requests are remapped, so another site never gets a
+	 * 401/403 login-state signal, even if a CORS grant were added back by a third party.
 	 *
 	 * @param \WP_HTTP_Response $response Response in our namespace.
+	 * @param \WP_REST_Request  $request Request.
+	 * @phpstan-param \WP_REST_Request<array<string,mixed>> $request
 	 */
-	private static function session_ended( \WP_HTTP_Response $response ): \WP_HTTP_Response {
+	private function session_ended( \WP_HTTP_Response $response, \WP_REST_Request $request ): \WP_HTTP_Response {
 		global $wp_rest_auth_cookie;
 		$data = $response->get_data();
-		if ( 403 !== $response->get_status() || ! is_array( $data ) || 'rest_cookie_invalid_nonce' !== ( $data['code'] ?? null ) || true === $wp_rest_auth_cookie || is_user_logged_in() ) {
+		if ( 403 !== $response->get_status() || ! is_array( $data ) || 'rest_cookie_invalid_nonce' !== ( $data['code'] ?? null ) || true === $wp_rest_auth_cookie || is_user_logged_in() || ! $this->guard->same_origin( $request ) ) {
 			return $response;
 		}
 		return rest_convert_error_to_response( Guard::error( 401 ) );
@@ -276,6 +293,25 @@ final class Api {
 		if ( $request instanceof \WP_REST_Request && self::ours( $request ) && ! headers_sent() ) {
 			foreach ( Headers::private() as $name => $value ) {
 				header( $name . ': ' . $value );
+			}
+		}
+		return $served;
+	}
+
+	/**
+	 * Drop core's CORS grant for our namespace, preflight (OPTIONS) included.
+	 *
+	 * WordPress echoes any Origin with Allow-Credentials on every REST route. Without these
+	 * headers a cross-site page cannot read status codes or bodies of panel responses.
+	 *
+	 * @param mixed $served Whether another filter served the request.
+	 * @param mixed $result Response.
+	 * @param mixed $request Request.
+	 */
+	public function strip_cors( mixed $served, mixed $result, mixed $request ): mixed {
+		if ( $request instanceof \WP_REST_Request && self::ours( $request ) && ! headers_sent() ) {
+			foreach ( self::CORS_HEADERS as $name ) {
+				header_remove( $name );
 			}
 		}
 		return $served;
@@ -331,6 +367,7 @@ final class Api {
 					'limit'       => $query['limit'],
 					'timezone'    => 'UTC',
 					'capture'     => $this->capture( $storage, $now ),
+					'maintenance' => $this->maintenance( $storage, $now ),
 				)
 			);
 		} catch ( \Throwable $failure ) {
@@ -369,6 +406,24 @@ final class Api {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Closed maintenance summary: state word, last run (ISO UTC) and losses rotated by it.
+	 *
+	 * Numbers come only from stored counters; absent values stay null, never zero.
+	 *
+	 * @param Storage $storage Ready storage.
+	 * @param int     $now Clock.
+	 * @return array{state:string,last_run:?string,dropped_before:array{events:?int,errors:?int}} Summary.
+	 */
+	private function maintenance( Storage $storage, int $now ): array {
+		$report = $storage->maintenance->report( $now );
+		return array(
+			'state'          => $report['state'],
+			'last_run'       => null === $report['last_run'] ? null : Filters::format( $report['last_run'] ),
+			'dropped_before' => $report['dropped_before'],
+		);
 	}
 
 	/**

@@ -59,7 +59,7 @@ final class Storage {
 		$db                = new Database( $connection );
 		$this->schema      = new Schema( $db );
 		$this->state       = new StateRepository( $db, $configuration->limits['state_rows'] );
-		$this->maintenance = new Maintenance( $db, $this->state );
+		$this->maintenance = new Maintenance( $db, $this->state, $configuration->limits['state_rows'] );
 		$budget            = new Budget( $this->state, $configuration );
 		$this->events      = new EventRepository( $db, $budget );
 		$this->errors      = new ErrorRepository( $db, $budget );

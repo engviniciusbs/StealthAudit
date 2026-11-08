@@ -158,7 +158,7 @@ final class Guard {
 	 * @param \WP_REST_Request $request Request.
 	 * @phpstan-param \WP_REST_Request<array<string,mixed>> $request
 	 */
-	private function same_origin( \WP_REST_Request $request ): bool {
+	public function same_origin( \WP_REST_Request $request ): bool {
 		$origin = $request->get_header( 'origin' );
 		if ( null !== $origin && strtolower( rtrim( $origin, '/' ) ) !== $this->urls->origin() ) {
 			return false;

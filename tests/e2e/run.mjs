@@ -9,7 +9,7 @@
 // Output: a numbered list of checks, artifacts/e2e/results.json, masked screenshots and
 // sanitized HTML captures in artifacts/e2e/render (gitignored; no QR, codes or nonces).
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -234,6 +234,12 @@ async function reducedMotion(browser) {
 }
 
 // ---------- the run ----------
+const RECOVER = 'node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit wp eval-file tests/e2e/fixture.php teardown (then restore)';
+// A snapshot left by an interrupted run is the only way back to the original site: never delete it.
+if (existsSync(join(OUT, 'snapshot.json'))) {
+  console.log(`A previous run left artifacts/e2e/snapshot.json. Restore the site first: ${RECOVER}`);
+  process.exit(1);
+}
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(RENDER, { recursive: true });
 mkdirSync(SHOTS, { recursive: true });
@@ -243,8 +249,10 @@ let proxy, attacker, browser;
 let setUp = false;
 try {
   await step('RFC 6238 SHA-1 vectors with the independent TOTP implementation', () => `${selfTest()} vectors`);
-  fixture('setup');
+  // Set before setup: a failure after the snapshot is written still runs teardown/restore,
+  // which are no-ops when no snapshot exists.
   setUp = true;
+  fixture('setup');
   const state = JSON.parse(readFileSync(join(OUT, 'state.json'), 'utf8'));
   const { operator, second, outsider } = state.users;
   proxy = await startProxy();
@@ -258,7 +266,8 @@ try {
     page.on('dialog', (d) => { problems.push(`dialog: ${d.message()}`); d.dismiss(); });
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     // The test site's active theme ("default") is missing, so WordPress core answers /favicon.ico/ with a 500 wp_die for logged-in users.
-    page.on('console', (m) => { if (m.type() === 'error' && !/favicon/.test(m.location()?.url || '') && !/status of 40[0134]|status of 429|status of 503/.test(m.text())) problems.push(`console: ${m.text()}`); });
+    // The attacker page's own console reports the CORS block that step 15 asserts; it is not a panel page.
+    page.on('console', (m) => { if (m.type() === 'error' && !page.url().startsWith(attacker.origin) && !/favicon/.test(m.location()?.url || '') && !/status of 40[0134]|status of 429|status of 503/.test(m.text())) problems.push(`console: ${m.text()}`); });
     return page;
   };
 
@@ -495,8 +504,36 @@ try {
     await evil.close();
     const hits = proxy.log.slice(before).filter((e) => e.path.includes('stealthaudit'));
     check(hits.length >= 3 && hits.every((e) => [401, 403].includes(e.status)), JSON.stringify(hits));
+    // Core's CORS grant is stripped for our namespace, so the credentialed fetch is unreadable.
+    check(seen.read === 'blocked', `cross-site fetch could read the status: ${seen.read}`);
+    const cors = {};
+    for (const method of ['GET', 'OPTIONS']) {
+      const r = await req.fetch(`${BASE}/?rest_route=/stealthaudit/v1/events`, { method, headers: { Origin: attacker.origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-wp-nonce' } });
+      const h = r.headers();
+      check(!('access-control-allow-origin' in h) && !('access-control-allow-credentials' in h), `${method} kept CORS: ${JSON.stringify(h)}`);
+      cors[method] = r.status();
+    }
+    // Control: a core route keeps WordPress's CORS grant (OPTIONS, so the test cache never stores it).
+    const core = await req.fetch(`${BASE}/?rest_route=/`, { method: 'OPTIONS', headers: { Origin: attacker.origin, 'Access-Control-Request-Method': 'GET' } });
+    check(core.headers()['access-control-allow-origin'] === attacker.origin, 'control: core namespace index lost its CORS header');
     check((await api(op, 'GET', 'status')).json.status === 'authorized', 'attacker changed state');
-    return { browserRead: seen.read, requests: hits.map((e) => `${e.method} ${e.status}${e.cookie ? ' (cookie)' : ''}`) };
+    return { browserRead: seen.read, cors, requests: hits.map((e) => `${e.method} ${e.status}${e.cookie ? ' (cookie)' : ''}`) };
+  });
+
+  await step('WP-Cron maintenance: real "wp cron event run", status API and panel line show the last run', async () => {
+    const before = JSON.parse(fixture('maintenance'));
+    check(Number.isInteger(before.scheduled), `maintenance not scheduled: ${JSON.stringify(before)}`);
+    wp('cron', 'event', 'run', 'stealthaudit_maintenance');
+    const after = JSON.parse(fixture('maintenance'));
+    check(after.state === 'current' && Number.isInteger(after.last_run), `maintenance report ${JSON.stringify(after)}`);
+    const status = (await api(op, 'GET', 'status')).json;
+    check(status.maintenance && status.maintenance.state === 'current' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(status.maintenance.last_run), `status maintenance ${JSON.stringify(status.maintenance)}`);
+    check(status.capture.events.state === 'available', `capture after maintenance ${JSON.stringify(status.capture)}`);
+    await goto(op, panelUrl('view=audit'));
+    await records(op);
+    const line = await op.locator('[data-sa-maintenance]').textContent();
+    check(line.includes('Manutenção:') && line.includes(status.maintenance.last_run) && line.includes('em dia'), `panel line: ${line}`);
+    return { scheduled: before.scheduled, before: before.state, after: after.state, line };
   });
 
   // ---------- revoke → challenge → TOTP ----------
@@ -807,7 +844,7 @@ try {
       console.log(fixture('teardown'));
       console.log(fixture('restore'));
     } catch (failure) {
-      console.log(`TEARDOWN FAILED: ${failure.message}. Run: node tools/wp-env.cjs run cli --env-cwd=wp-content/mu-plugins/stealthaudit wp eval-file tests/e2e/fixture.php teardown (then restore)`);
+      console.log(`TEARDOWN FAILED: ${failure.message}. Run: ${RECOVER}`);
       process.exitCode = 1;
     }
   }

@@ -514,8 +514,28 @@
 			capture.appendChild( collector );
 			complete = complete && 'available' === state.diagnostics;
 		}
+		capture.appendChild( maintenanceLine( data && data.maintenance, kind ) );
 		capture.hidden = false;
 		return complete;
+	}
+
+	/* Last run, backlog/overdue word and losses rotated by the last run; nothing invented. */
+	function maintenanceLine( state, kind ) {
+		var own = state && 'object' === typeof state ? state : { state: 'unavailable', last_run: null, dropped_before: {} };
+		var line = el( 'p' );
+		line.setAttribute( 'data-sa-maintenance', own.state );
+		line.appendChild( el( 'strong', '', text( 'maintenance' ) ) );
+		var parts = [];
+		if ( 'string' === typeof own.last_run ) {
+			parts.push( text( 'last_run' ).replace( '%s', own.last_run ) );
+		}
+		parts.push( label( 'maintenance', own.state ) );
+		var before = own.dropped_before ? own.dropped_before[ kind ] : null;
+		if ( 'number' === typeof before && before > 0 ) {
+			parts.push( count( 'dropped_before', before ) );
+		}
+		line.appendChild( document.createTextNode( ' ' + parts.join( '; ' ) ) );
+		return line;
 	}
 
 	function cell( tr, value, className ) {

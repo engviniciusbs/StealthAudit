@@ -8,9 +8,14 @@
 declare(strict_types=1);
 namespace StealthAudit\Storage;
 
-/** No activation hook and no DDL in record-writing methods. */
+/**
+ * No activation hook and no DDL in record-writing methods.
+ *
+ * Version 2 adds first-occurrence indexes to the errors table for the 30-day query window
+ * and the ordered physical purge. Upgrading from 1 reruns dbDelta under the same lease.
+ */
 final class Schema {
-	public const VERSION      = '1';
+	public const VERSION      = '2';
 	private const VERSION_KEY = 'stealthaudit_schema_version';
 	private const LEASE_KEY   = 'stealthaudit_schema_lease';
 
@@ -114,7 +119,9 @@ logical_bytes int unsigned NOT NULL,
 PRIMARY KEY  (id),
 KEY seen (last_seen,id),
 KEY severity_time (severity,last_seen,id),
-KEY fingerprint (fingerprint)
+KEY fingerprint (fingerprint),
+KEY first_time (first_seen,id),
+KEY severity_first (severity,first_seen,id)
 ) ENGINE=InnoDB $charset;"
 			);
 			dbDelta(
@@ -182,10 +189,12 @@ KEY expires (expires_at,state_key)
 					'logical_bytes'  => 'int unsigned',
 				),
 				array(
-					'PRIMARY'       => array( 'id' ),
-					'seen'          => array( 'last_seen', 'id' ),
-					'severity_time' => array( 'severity', 'last_seen', 'id' ),
-					'fingerprint'   => array( 'fingerprint' ),
+					'PRIMARY'        => array( 'id' ),
+					'seen'           => array( 'last_seen', 'id' ),
+					'severity_time'  => array( 'severity', 'last_seen', 'id' ),
+					'fingerprint'    => array( 'fingerprint' ),
+					'first_time'     => array( 'first_seen', 'id' ),
+					'severity_first' => array( 'severity', 'first_seen', 'id' ),
 				),
 			),
 			'state'  => array(

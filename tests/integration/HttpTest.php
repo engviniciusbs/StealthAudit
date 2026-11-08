@@ -96,7 +96,7 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 'password_required', $response->get_data()['data']['panel'] );
 		$status = $this->call( 'GET', '/status' );
 		self::assertSame( 200, $status->get_status() );
-		self::assertSame( array( 'status' => 'password_required', 'capture' => null ), $status->get_data() );
+		self::assertSame( array( 'status' => 'password_required', 'capture' => null, 'maintenance' => null ), $status->get_data() );
 		// No WordPress session.
 		wp_set_current_user( 0 );
 		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
@@ -168,6 +168,14 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 				$this->responses[] = $ended;
 				$this->assert_denied( $ended, 401, 'stealthaudit_unauthenticated' );
 			}
+			// A cross-origin request keeps core's 403: no login-state signal for another site.
+			$_SERVER['HTTP_X_WP_NONCE'] = $rest_nonce;
+			$cross = $this->request( 'GET', '/events', array(), null, array( 'Origin' => 'https://evil.example' ) );
+			$cross_response = apply_filters( 'rest_post_dispatch', rest_convert_error_to_response( rest_cookie_check_errors( null ) ), rest_get_server(), $cross );
+			self::assertSame( 403, $cross_response->get_status() );
+			self::assertSame( 'rest_cookie_invalid_nonce', $cross_response->get_data()['code'] );
+			$same = $this->request( 'GET', '/events', array(), null, array( 'Origin' => home_url() ) );
+			self::assertSame( 401, apply_filters( 'rest_post_dispatch', rest_convert_error_to_response( rest_cookie_check_errors( null ) ), rest_get_server(), $same )->get_status() );
 			// Another namespace keeps WordPress's own answer.
 			$other = apply_filters( 'rest_post_dispatch', rest_convert_error_to_response( rest_cookie_check_errors( null ) ), rest_get_server(), new WP_REST_Request( 'GET', '/wp/v2/users/me' ) );
 			self::assertSame( 'rest_cookie_invalid_nonce', $other->get_data()['code'] );
@@ -293,6 +301,48 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		self::assertSame( 'suspended', $this->call( 'GET', '/events' )->get_data()['capture']['events']['state'] );
 		$this->db->execute( 'UPDATE %i SET payload=%s WHERE state_key=%s', $this->db->table( 'state' ), '{"rows":"x"}', 'budget:errors' );
 		self::assertSame( array( 'state' => 'unavailable', 'dropped' => null ), $this->call( 'GET', '/errors' )->get_data()['capture']['errors'] );
+	}
+
+	public function test_maintenance_state_is_exposed_only_when_authorized_and_clears_capture(): void {
+		$this->enroll();
+		$data = $this->call( 'GET', '/status' )->get_data();
+		self::assertSame( array( 'state' => 'never', 'last_run' => null, 'dropped_before' => array( 'events' => null, 'errors' => null ) ), $data['maintenance'] );
+		$this->budget( 'errors', array( 'dropped' => 4, 'rows' => 900 ) );
+		self::assertSame( array( 'state' => 'limited', 'dropped' => 4 ), $this->call( 'GET', '/errors' )->get_data()['capture']['errors'] );
+		self::assertSame( 'complete', $this->storage->maintenance->run( $this->now )['result'] );
+		$list = $this->call( 'GET', '/errors' )->get_data();
+		self::assertSame( array( 'state' => 'available', 'dropped' => 0 ), $list['capture']['errors'] );
+		self::assertSame( array( 'state' => 'current', 'last_run' => gmdate( 'Y-m-d\TH:i:s\Z', $this->now ), 'dropped_before' => array( 'events' => 0, 'errors' => 4 ) ), $list['maintenance'] );
+		self::assertSame( $list['maintenance'], $this->call( 'GET', '/status' )->get_data()['maintenance'] );
+		self::assertSame( 0, $this->storage->state->get( 'budget:errors', $this->now )['payload']['rows'] );
+		// Malformed status is reported as such, never as a healthy default.
+		$this->db->execute( 'UPDATE %i SET payload=%s WHERE state_key=%s', $this->db->table( 'state' ), '{"ran_at":"x"}', 'maintenance:status' );
+		self::assertSame( 'unavailable', $this->call( 'GET', '/status' )->get_data()['maintenance']['state'] );
+		// Without the second factor nothing about maintenance is returned.
+		$this->call( 'POST', '/revoke', array(), array() );
+		self::assertNull( $this->call( 'GET', '/status' )->get_data()['maintenance'] );
+	}
+
+	public function test_core_cors_grant_is_stripped_after_core_for_our_namespace_only(): void {
+		global $wp_filter;
+		$core = has_filter( 'rest_pre_serve_request', 'rest_send_cors_headers' );
+		self::assertSame( 10, $core );
+		$ours = null;
+		foreach ( $wp_filter['rest_pre_serve_request']->callbacks as $priority => $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Api && 'strip_cors' === $callback['function'][1] ) {
+					$ours = $priority;
+				}
+			}
+		}
+		self::assertSame( Api::CORS_PRIORITY, $ours );
+		self::assertGreaterThan( $core, $ours );
+		self::assertSame( array( 'Access-Control-Allow-Origin', 'Access-Control-Allow-Credentials' ), Api::CORS_HEADERS );
+		// The filter passes the served flag through untouched, preflight included.
+		foreach ( array( 'GET', 'OPTIONS' ) as $method ) {
+			self::assertFalse( $this->api->strip_cors( false, null, new WP_REST_Request( $method, '/' . Urls::NAMESPACE . '/events' ) ) );
+			self::assertTrue( $this->api->strip_cors( true, null, new WP_REST_Request( $method, '/wp/v2/users' ) ) );
+		}
 	}
 
 	public function test_log_text_with_markup_is_returned_inert(): void {

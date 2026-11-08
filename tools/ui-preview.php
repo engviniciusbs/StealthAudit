@@ -38,8 +38,8 @@ $stub = <<<'JS'
 	];
 	var errors = [];
 	var answers = {
-		full: [ 200, { items: events, next_cursor: '1762542727-5', limit: 50, timezone: 'UTC', capture: capture } ],
-		empty: [ 200, { items: errors, next_cursor: null, limit: 50, timezone: 'UTC', capture: { diagnostics: 'limited_previous_handler', events: { state: 'available', dropped: 0 }, errors: { state: 'limited', dropped: 3 } } } ],
+		full: [ 200, { items: events, next_cursor: '1762542727-5', limit: 50, timezone: 'UTC', capture: capture, maintenance: { state: 'current', last_run: '2026-11-07T21:00:00Z', dropped_before: { events: 0, errors: 0 } } } ],
+		empty: [ 200, { items: errors, next_cursor: null, limit: 50, timezone: 'UTC', capture: { diagnostics: 'limited_previous_handler', events: { state: 'available', dropped: 0 }, errors: { state: 'limited', dropped: 3 } }, maintenance: { state: 'backlog', last_run: '2026-11-07T20:00:00Z', dropped_before: { events: 0, errors: 2 } } } ],
 		error: [ 503, { code: 'stealthaudit_unavailable', message: 'Service unavailable.', data: { status: 503 } } ],
 		expired: [ 401, { code: 'stealthaudit_proof_required', message: 'Authentication required.', data: { status: 401, panel: 'challenge_required' } } ],
 		session: [ 401, { code: 'stealthaudit_unauthenticated', message: 'Authentication required.', data: { status: 401 } } ],

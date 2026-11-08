@@ -57,6 +57,15 @@ $stealthaudit_labels = array(
 		'suspended'   => __( 'suspensa por capacidade: novos registros não estão sendo gravados', 'stealthaudit' ),
 		'unavailable' => __( 'estado indisponível', 'stealthaudit' ),
 	),
+	'maintenance' => array(
+		'current'     => __( 'em dia', 'stealthaudit' ),
+		'backlog'     => __( 'com trabalho pendente; a próxima execução continua de onde parou', 'stealthaudit' ),
+		'blocked'     => __( 'recontagem adiada: havia gravação em andamento', 'stealthaudit' ),
+		'overdue'     => __( 'atrasada: o WP-Cron depende de visitas ao site', 'stealthaudit' ),
+		'failed'      => __( 'a última execução falhou', 'stealthaudit' ),
+		'never'       => __( 'ainda não executada', 'stealthaudit' ),
+		'unavailable' => __( 'estado indisponível', 'stealthaudit' ),
+	),
 	'diagnostics' => array(
 		'available'                => __( 'ativo nesta requisição', 'stealthaudit' ),
 		'waiting_storage'          => __( 'aguardando o armazenamento', 'stealthaudit' ),
@@ -99,6 +108,11 @@ $stealthaudit_messages = array(
 	'capture_events'   => __( 'Captura de auditoria:', 'stealthaudit' ),
 	'capture_errors'   => __( 'Captura de erros:', 'stealthaudit' ),
 	'collector'        => __( 'Coletor de erros:', 'stealthaudit' ),
+	'maintenance'      => __( 'Manutenção:', 'stealthaudit' ),
+	/* translators: %s: ISO 8601 UTC time of the last maintenance run. */
+	'last_run'         => __( 'última execução %s', 'stealthaudit' ),
+	/* translators: %d: records discarded in the period closed by the last maintenance. */
+	'dropped_before'   => __( '%d descartados antes da última manutenção', 'stealthaudit' ),
 	/* translators: %d: cumulative number of discarded records. */
 	'dropped'          => __( '%d descartados', 'stealthaudit' ),
 	'none'             => __( 'sem registro', 'stealthaudit' ),

@@ -64,6 +64,12 @@ final class Runtime {
 	 * @var bool
 	 */
 	private bool $http_initialized = false;
+	/**
+	 * Prevent duplicate cron registration.
+	 *
+	 * @var bool
+	 */
+	private bool $maintenance_initialized = false;
 
 	/**
 	 * Keep the boot result without exposing exception details.
@@ -95,6 +101,7 @@ final class Runtime {
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_storage' ), 5 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_audit' ), 10 );
 		add_action( 'plugins_loaded', array( self::$instance, 'initialize_http' ), 20 );
+		add_action( 'plugins_loaded', array( self::$instance, 'initialize_maintenance' ), 30 );
 		return self::$instance;
 	}
 
@@ -161,6 +168,15 @@ final class Runtime {
 		$panel                  = new Panel( $this->configuration, $urls, $access, dirname( __DIR__, 2 ) . '/templates/panel.php' );
 		( new Router( $urls, $panel, fn () => $this->storage()->state, $clock, new Assets( $this->configuration, dirname( __DIR__, 2 ) . '/assets' ) ) )->register();
 		( new Api( new Guard( $this->configuration, $access, $urls ), fn (): Storage => $this->storage(), fn (): array => $this->diagnostic_health(), $this->configuration, $clock ) )->register();
+	}
+
+	/** Register the WP-Cron handler and schedule; independent of panel configuration. */
+	public function initialize_maintenance(): void {
+		if ( $this->maintenance_initialized || ! $this->collection_available() ) {
+			return;
+		}
+		$this->maintenance_initialized = true;
+		( new Scheduler( fn (): Storage => $this->storage(), static fn (): int => time() ) )->register();
 	}
 
 	/** Initialize schema once at the WordPress lifecycle boundary, never per event. */

@@ -13,6 +13,7 @@
  * inject    Store an HTML/script payload as a diagnostic (real repository) and as a raw event row.
  * theme     Switch to a bundled theme (or "restore").
  * subdir    Create or remove the /blog symlink used for the subdirectory install.
+ * maintenance Print the scheduled maintenance time and its closed report (read-only).
  * inspect   Print fixture counters; never secrets.
  * teardown  Delete the synthetic users and posts (audited at shutdown of this process).
  * restore   In a new process: restore files, options and StealthAudit tables, verify, delete fixture files.
@@ -249,6 +250,19 @@ switch ( $e2e_action ) {
 		WP_CLI::success( 'Subdirectory: ' . ( is_link( $link ) ? 'on' : 'off' ) );
 		break;
 
+	case 'maintenance':
+		// Read-only: the run itself goes through "wp cron event run", WP-Cron's own runner.
+		$next   = wp_next_scheduled( \StealthAudit\Bootstrap\Scheduler::HOOK, array() );
+		$report = \StealthAudit\Bootstrap\Runtime::boot()->storage()->maintenance->report( time() );
+		echo wp_json_encode(
+			array(
+				'scheduled' => false === $next ? null : (int) $next,
+				'state'     => $report['state'],
+				'last_run'  => $report['last_run'],
+			)
+		) . "\n";
+		break;
+
 	case 'inspect':
 		$snapshot = $e2e_read( $e2e_snapshot );
 		$rules    = get_option( 'rewrite_rules' );
@@ -296,6 +310,9 @@ switch ( $e2e_action ) {
 		file_put_contents( $e2e_config, base64_decode( $snapshot['wp_config'], true ) );
 		if ( null !== $snapshot['htaccess'] ) {
 			file_put_contents( ABSPATH . '.htaccess', base64_decode( $snapshot['htaccess'], true ) );
+		} elseif ( is_file( ABSPATH . '.htaccess' ) ) {
+			// Pretty permalinks made WordPress write a file that did not exist before the run.
+			unlink( ABSPATH . '.htaccess' );
 		}
 		// Deleting the users above may itself be audited; drop every row added by this run.
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE id>%d', $e2e_table( 'events' ), $snapshot['events'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
@@ -324,12 +341,13 @@ switch ( $e2e_action ) {
 		}
 		wp_cache_flush();
 		$left = array(
-			'config'  => base64_encode( (string) file_get_contents( $e2e_config ) ) !== $snapshot['wp_config'],
-			'options' => $wpdb->get_results( $wpdb->prepare( 'SELECT option_name, option_value, autoload FROM %i ORDER BY option_name', $wpdb->options ), ARRAY_A ) != $snapshot['options'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery, Universal.Operators.StrictComparisons -- Row order may differ.
-			'users'   => array_map( 'intval', $wpdb->get_col( $wpdb->prepare( 'SELECT ID FROM %i ORDER BY ID', $wpdb->users ) ) ) !== $snapshot['users'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			'state'   => $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i ORDER BY state_key', $e2e_table( 'state' ) ), ARRAY_A ) != $snapshot['state'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery, Universal.Operators.StrictComparisons
-			'records' => (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'events' ) ) ) > $snapshot['events'] || (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'errors' ) ) ) > $snapshot['errors'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			'symlink' => file_exists( ABSPATH . 'blog' ),
+			'config'   => base64_encode( (string) file_get_contents( $e2e_config ) ) !== $snapshot['wp_config'],
+			'htaccess' => ( is_file( ABSPATH . '.htaccess' ) ? base64_encode( (string) file_get_contents( ABSPATH . '.htaccess' ) ) : null ) !== $snapshot['htaccess'],
+			'options'  => $wpdb->get_results( $wpdb->prepare( 'SELECT option_name, option_value, autoload FROM %i ORDER BY option_name', $wpdb->options ), ARRAY_A ) != $snapshot['options'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery, Universal.Operators.StrictComparisons -- Row order may differ.
+			'users'    => array_map( 'intval', $wpdb->get_col( $wpdb->prepare( 'SELECT ID FROM %i ORDER BY ID', $wpdb->users ) ) ) !== $snapshot['users'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			'state'    => $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i ORDER BY state_key', $e2e_table( 'state' ) ), ARRAY_A ) != $snapshot['state'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery, Universal.Operators.StrictComparisons
+			'records'  => (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'events' ) ) ) > $snapshot['events'] || (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(MAX(id),0) FROM %i', $e2e_table( 'errors' ) ) ) > $snapshot['errors'], // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			'symlink'  => file_exists( ABSPATH . 'blog' ),
 		);
 		if ( in_array( true, $left, true ) ) {
 			WP_CLI::error( 'Restore incomplete: ' . implode( ', ', array_keys( array_filter( $left ) ) ) . '; snapshot kept in artifacts/e2e.' );

@@ -137,20 +137,20 @@ final class StateRepository {
 	 * @throws StorageException On unknown/arbitrary identity.
 	 */
 	private static function validate_key( string $key ): void {
-		if ( ! preg_match( '/^(?:factor:[1-9][0-9]{0,18}|(?:proof|limit|lease):[a-f0-9]{64}|budget:(?:events|errors|state))$/D', $key ) ) {
+		if ( ! preg_match( '/^(?:factor:[1-9][0-9]{0,18}|(?:proof|limit|lease):[a-f0-9]{64}|budget:(?:events|errors|state)|maintenance:status)$/D', $key ) ) {
 			throw new StorageException( 'Invalid state identity.' );
 		}
 	}
 
 	/**
-	 * Require expiry on ephemeral namespaces.
+	 * Require expiry on ephemeral namespaces; factors, budgets and maintenance state persist.
 	 *
 	 * @param string   $key State key.
 	 * @param int|null $expires UTC expiry.
 	 * @throws StorageException When ephemeral state has no TTL.
 	 */
 	private function validate_expiry( string $key, ?int $expires ): void {
-		if ( null === $expires && ! str_starts_with( $key, 'factor:' ) && ! str_starts_with( $key, 'budget:' ) ) {
+		if ( null === $expires && ! str_starts_with( $key, 'factor:' ) && ! str_starts_with( $key, 'budget:' ) && ! str_starts_with( $key, 'maintenance:' ) ) {
 			throw new StorageException( 'State expiry required.' );
 		}
 		if ( null !== $expires && ( $expires < 1 || $expires > 253402300799 ) ) {

@@ -17,6 +17,12 @@ if ( "go\n" !== fgets( STDIN ) ) {
 }
 if ( 'cas' === $input['mode'] ) {
 	$result = $storage->state->compare_and_swap( 'factor:4', $revision, array( 'generation' => 2 ), null, time() );
+} elseif ( 'ensure' === $input['mode'] ) {
+	$result = $storage->schema->ensure();
+} elseif ( 'maintenance' === $input['mode'] ) {
+	// Prints the run result word instead of 0/1.
+	echo $storage->maintenance->run( (int) $input['now'] )['result'];
+	exit( 0 );
 } else {
 	$result = $storage->events->append( array( 'category' => 'content', 'action' => 'created', 'result' => 'success', 'origin' => 'cli' ), time() );
 }
