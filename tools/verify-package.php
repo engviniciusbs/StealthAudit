@@ -286,8 +286,7 @@ try {
 	}
 	// Apache-2.0 §4(b): every shipped vendor PHP file carries the modification notice on line 2.
 	foreach ( $php as $name ) {
-		if ( str_starts_with( $name, $core . 'vendor/' ) && STEALTHAUDIT_PACKAGE_NOTICE !== ( explode( "
-", $files[ $name ], 3 )[1] ?? '' ) ) {
+		if ( str_starts_with( $name, $core . 'vendor/' ) && STEALTHAUDIT_PACKAGE_NOTICE !== ( explode( "\n", $files[ $name ], 3 )[1] ?? '' ) ) {
 			$fail( "Modification notice missing in {$name}" );
 		}
 	}

@@ -6,6 +6,7 @@
 //
 // tools/package.php includes this file and calls stealthaudit_third_party_notices() on its clean
 // build, then refuses to package when the committed THIRD-PARTY-NOTICES.md differs.
+require_once __DIR__ . '/package-lib.php';
 
 /**
  * Notices for the production packages of a lock, with each package's license files from $vendor.
@@ -16,7 +17,7 @@
  */
 function stealthaudit_third_party_notices( array $lock, string $vendor ): string {
 	$notice  = "# Third-party notices\n\nGenerated from composer.lock. StealthAudit original code is GPL-3.0-or-later.\nDependency copyrights and license terms below remain in force. No MMDB is bundled.\n\n";
-	$notice .= "Modified files: in the distribution ZIP every bundled third-party PHP file is changed\nmechanically by the StealthAudit build. Namespaces and imports are prefixed with\nStealthAuditVendor\\ (PHP-Scoper 0.18.20), calls to trigger_deprecation() are qualified with\nthat prefix, and Composer's generated autoloader is moved under it. Files not needed at\nruntime (documentation, tests, tooling, the maxminddb C extension sources) are omitted.\nEach modified PHP file starts with a one-line notice saying so. Nothing else is changed.\n\n";
+	$notice .= "Modified files: in the distribution ZIP every bundled third-party PHP file is changed\nmechanically by the StealthAudit build. Namespaces and imports are prefixed with\nStealthAuditVendor\\ (PHP-Scoper " . STEALTHAUDIT_SCOPER_VERSION . "), calls to trigger_deprecation() are qualified with\nthat prefix, and Composer's generated autoloader is moved under it. Files not needed at\nruntime (documentation, tests, tooling, the maxminddb C extension sources) are omitted.\nEach modified PHP file starts with a one-line notice saying so. Nothing else is changed.\n\n";
 	foreach ( $lock['packages'] as $package ) {
 		$notice .= '## ' . $package['name'] . ' ' . $package['version'] . "\n\n";
 		$notice .= 'License: ' . implode( ', ', $package['license'] ) . "\n\n";

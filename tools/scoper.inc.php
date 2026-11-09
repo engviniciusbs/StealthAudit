@@ -1,6 +1,7 @@
 <?php
 // SPDX-License-Identifier: GPL-3.0-or-later
-// PHP-Scoper 0.18.20 configuration used only by tools/package.php (never shipped).
+// PHP-Scoper configuration used only by tools/package.php (never shipped). The PHP-Scoper release
+// is pinned once, as STEALTHAUDIT_SCOPER_VERSION in tools/package-lib.php.
 //
 // Scope ONLY the production vendor tree of a clean temporary build: every third-party symbol
 // moves under StealthAuditVendor\. The product's own code (src/, templates/, loader, bin/) is not

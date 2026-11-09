@@ -4,10 +4,10 @@
 *.zip binary
 
 # Source archives (git archive / GitHub "Download ZIP") carry only what the distribution ZIP
-# ships plus README.md, docs/ and the Composer manifests. Everything below is development-only
-# and is also absent from the package; tools/package.php builds from `git archive` and fails
-# when the archive holds a file that is neither shipped nor listed as source-only, so this list
-# and the package exclusions cannot drift apart.
+# ships plus README.md, CONTRIBUTING.md, SECURITY.md, docs/ and the Composer manifests.
+# Everything below is development-only and is also absent from the package; tools/package.php
+# builds from `git archive` and fails when the archive holds a file that is neither shipped nor
+# listed as source-only, so this list and the package exclusions cannot drift apart.
 /.gitattributes export-ignore
 /.gitignore export-ignore
 /.hallmark export-ignore

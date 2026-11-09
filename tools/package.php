@@ -16,12 +16,11 @@
 if ( 'cli' !== PHP_SAPI ) {
 	exit( 1 );
 }
-require __DIR__ . '/package-lib.php';
+require_once __DIR__ . '/package-lib.php';
 require __DIR__ . '/notices.php';
 
-const STEALTHAUDIT_SCOPER_VERSION = '0.18.20';
 const STEALTHAUDIT_SCOPER_SHA256  = '5e35e4a89ea53b2c70a19bfa8a856e4f9080aa12eb13a5bce650bb69d08eb122';
-const STEALTHAUDIT_SCOPER_URL     = 'https://github.com/humbug/php-scoper/releases/download/0.18.20/php-scoper.phar';
+const STEALTHAUDIT_SCOPER_URL     = 'https://github.com/humbug/php-scoper/releases/download/' . STEALTHAUDIT_SCOPER_VERSION . '/php-scoper.phar';
 // Licenses compatible with distributing the bundle under GPL-3.0-or-later.
 const STEALTHAUDIT_LICENSES = array( 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'ISC' );
 // ZIP entry times are the last commit time of the packaged inputs (--source-date-epoch from tools/package.mjs, like
@@ -44,7 +43,7 @@ $shipped = array(
 	'THIRD-PARTY-NOTICES.md'           => 'stealthaudit/THIRD-PARTY-NOTICES.md',
 );
 $build_inputs = array( 'composer.json', 'composer.lock' );
-$source_only  = array( 'README.md', 'docs/' );
+$source_only  = array( 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'docs/' );
 
 $log = static function ( string $message ): void {
 	fwrite( STDOUT, '[package] ' . $message . "\n" );
@@ -144,10 +143,12 @@ try {
 	$loader         = (string) file_get_contents( $tree . '/loader/stealthaudit.php' );
 	$source_version = stealthaudit_package_loader_version( $loader );
 	$npm_version    = json_decode( (string) file_get_contents( $repo . '/package.json' ), true, 16, JSON_THROW_ON_ERROR )['version'] ?? null;
+	$npm_lock       = json_decode( (string) file_get_contents( $repo . '/package-lock.json' ), true, 512, JSON_THROW_ON_ERROR );
 	$runtime_file    = $tree . '/src/Bootstrap/Runtime.php';
 	$runtime_version = preg_match( "/^	public const VERSION = '([^']+)';$/m", (string) file_get_contents( $runtime_file ), $m ) ? $m[1] : null;
-	if ( null === $source_version || $source_version !== $npm_version || $source_version !== $runtime_version ) {
-		throw new RuntimeException( "Loader ({$source_version}), Runtime::VERSION ({$runtime_version}) and package.json ({$npm_version}) versions differ." );
+	$lock_versions   = array( $npm_lock['version'] ?? null, $npm_lock['packages']['']['version'] ?? null );
+	if ( null === $source_version || $source_version !== $npm_version || $source_version !== $runtime_version || array( $source_version, $source_version ) !== $lock_versions ) {
+		throw new RuntimeException( "Loader ({$source_version}), Runtime::VERSION ({$runtime_version}), package.json ({$npm_version}) and package-lock.json (" . implode( '/', array_map( 'strval', $lock_versions ) ) . ') versions differ.' );
 	}
 	$version = (string) ( $options['package-version'] ?? $source_version );
 	if ( ! preg_match( '/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/D', $version ) ) {
@@ -406,14 +407,10 @@ try {
 			continue;
 		}
 		$code = (string) file_get_contents( $core . '/vendor/' . $file );
-		if ( ! preg_match( '/^<\?php?
-/', $code ) ) {
+		if ( ! preg_match( '/^<\?php\r?\n/', $code ) ) {
 			throw new RuntimeException( "vendor/{$file} does not start with '<?php' on its own line." );
 		}
-		file_put_contents( $core . '/vendor/' . $file, preg_replace( '/^<\?php?
-/', "<?php
-" . STEALTHAUDIT_PACKAGE_NOTICE . "
-", $code, 1 ) );
+		file_put_contents( $core . '/vendor/' . $file, preg_replace( '/^<\?php\r?\n/', "<?php\n" . STEALTHAUDIT_PACKAGE_NOTICE . "\n", $code, 1 ) );
 		++$marked;
 	}
 	$log( "modification notice added to {$marked} vendor PHP files" );

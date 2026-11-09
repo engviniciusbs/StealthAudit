@@ -12,8 +12,12 @@
 
 const STEALTHAUDIT_PACKAGE_PREFIX = 'StealthAuditVendor';
 
+// PHP-Scoper release used by the build: the single source for the PHAR download (tools/package.php),
+// the line-2 notice below and the THIRD-PARTY-NOTICES header (tools/notices.php).
+const STEALTHAUDIT_SCOPER_VERSION = '0.18.20';
+
 // Second line of every shipped vendor PHP file (Apache-2.0 §4(b): modified files say so).
-const STEALTHAUDIT_PACKAGE_NOTICE = '// Modified by the StealthAudit build: namespaces prefixed with StealthAuditVendor\\ (PHP-Scoper 0.18.20); see THIRD-PARTY-NOTICES.md.';
+const STEALTHAUDIT_PACKAGE_NOTICE = '// Modified by the StealthAudit build: namespaces prefixed with StealthAuditVendor\\ (PHP-Scoper ' . STEALTHAUDIT_SCOPER_VERSION . '); see THIRD-PARTY-NOTICES.md.';
 
 // Composer's runtime is shipped only under the prefix, outside the vendor roots: product code must
 // never name the global Composer\Autoload\* or Composer\InstalledVersions (another plugin's copy).
