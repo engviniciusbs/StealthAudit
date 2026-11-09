@@ -134,11 +134,20 @@ npm run test:package            # build, verificação, teste negativo, instala�
 
 ## Resultados (fase 8c)
 
-- Pacote `dist/stealthaudit-0.1.0-dev.zip`, SHA-256 `46ec2ffba4a573eea1f31ba7c1425010235bf2098765aafc3ac4fcad546eab1e` (222 arquivos, 457.933 bytes, commit `4c295ba`, árvore limpa); segundo build idêntico. `verify-package` OK; 13/13 cópias adulteradas rejeitadas.
-- Composer na cópia de build: `validate --strict`, `audit --locked --no-dev`, `check-platform-reqs --lock --no-dev` e licenças (allowlist) aprovados. Plugin Check 2.1.0: 27 ocorrências, todas justificadas em [package.md](package.md#plugin-check-apoio).
-- `npm run test:package`: 24 passos aprovados no roteiro de registro, incluindo o e2e completo **pelo artefato** (35/35) e de novo com outro plugin carregando outras versões das mesmas bibliotecas (35/35), atualização A → B com dados/fator/prova/configuração preservados e o CLI empacotado no contêiner web sem Composer. Plugin Check, varredura do log do Apache (0 diagnósticos PHP) e destruição do ambiente rodaram depois de uma reinicialização externa do Docker (detalhes em package.md).
-- Defeito de build encontrado e corrigido: o PHP-Scoper não prefixava `MaxMind\Db\Reader` (símbolo de stub de extensão); a GeoIP falhava no pacote. Ver package.md.
+Primeira rodada (2026-11-08): ZIP `46ec2ffb…eab1e` (datas fixas de 1980, sem aviso de modificação no vendor), 24 passos do `test:package` aprovados antes de uma reinicialização externa do Docker; Plugin Check, varredura do log e destruição feitos depois, à mão. A revisão pediu mudanças (opcache após atualização e avisos Apache-2.0 §4(b)); o registro válido é o da rodada de correção abaixo.
+
+## Rodada de correção 1 (revisão phase8c-review.md)
+
+- **Datas das entradas do ZIP** = data do último commit das entradas do pacote (fontes embarcadas, manifestos Composer, ferramentas de build), passada por `tools/package.mjs` como `--source-date-epoch`; determinístico por commit e estável em commits só de testes/docs (observado: `dfba1e6`, só de teste, gerou o mesmo SHA que `fcaeda4`).
+- **Opcache**: `installation.md` exige recarregar PHP-FPM/Apache (ou `opcache_reset()`) após atualização e rollback. O teste de atualização instala com cópia que preserva datas, mostrou que **sem o reload o Apache continuou executando A** (mesmo mtime em A e B; `Runtime::VERSION` = `0.1.0-dev` com os arquivos de B no disco) e exige o marcador de B em todas as sondagens após `apachectl -k graceful`. `Runtime::VERSION` é novo e checado contra o loader e o `package.json` (teste unitário, build e `verify-package`).
+- **Apache-2.0 §4(b)**: aviso de modificação na linha 2 dos 160 PHP do vendor; cabeçalho das notices descreve as mudanças; nova seção do runtime do Composer (MIT); `verify-package` exige os três.
+- `bin/security-operator.php` coberto por phpcs e PHPStan nível 6; o teste do artefato pegou uma regressão introduzida nessa reformatação (variável global com o mesmo nome que o loader MU apaga) e ela foi corrigida (`$stealthaudit_cli_*`).
+- Varredura de padrões proibidos sobre o código empacotado registrada e revisada à mão em [package.md](package.md#padrões-proibidos-no-código-empacotado-item-7-da-fase-8) (grep não é auditoria).
+- Pacote `dist/stealthaudit-0.1.0-dev.zip`, **SHA-256 `dc6dc89824b509fc62dbf66f060848cfbf1fd7f0d0793faa412cdd4656e862c0`** (222 arquivos, 471.618 bytes, commit `de6fb79`, árvore limpa); segundo build idêntico; `verify-package --against-source` OK; **16/16** cópias adulteradas rejeitadas.
+- `npm run test:package` (ambiente novo, sem interrupção): **25/25** passos, e2e pelo artefato 35/35 e com outro plugin carregado antes 35/35, atualização A → B com o código de B executando após o reload, CLI empacotado (recusa, rotação, validação, reset), Plugin Check 2.1.0 com 4 ocorrências justificadas, log do Apache sem diagnósticos PHP, ambiente destruído.
 
 ## Suítes finais no ambiente original (8880), fase 8c
 
 Depois do `test:package` (ambiente adicional destruído) e da reinicialização externa do Docker (contêineres do 8880 religados com `docker start`, sem reconfiguração), PHP 8.3.36 / MariaDB 10.11.19: `npm run test:unit` 214 testes, 649 asserções, 1 skip; `npm run test:integration` 90 testes, 3.024 asserções; `npm run test:concurrency` 15 testes, 229 asserções; `npm run quality` sem erros (lint agora inclui `bin/`); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
+
+Rodada de correção 1 (2026-11-09), depois do `test:package` de registro: `npm run test:unit` 215 testes, 651 asserções, 1 skip (novo teste de `Runtime::VERSION`); `npm run test:integration` 90 testes, 3.024 asserções; `npm run test:concurrency` 15 testes, 229 asserções; `npm run quality` sem erros (phpcs e PHPStan agora incluem `bin/`); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
