@@ -336,12 +336,16 @@ final class Api {
 	/**
 	 * Whether a request targets this namespace.
 	 *
+	 * Uses the same rules as WP_REST_Server::match_request_to_handler(), which matches routes
+	 * with '@^route$@i': case-insensitive, and "$" also matches before a final newline. A route
+	 * WordPress dispatches to our handlers, such as /StealthAudit/v1/events, must also get the
+	 * namespace hardening (CORS strip, transport rejection, private headers, hex JSON).
+	 *
 	 * @param \WP_REST_Request $request Request.
 	 * @phpstan-param \WP_REST_Request<array<string,mixed>> $request
 	 */
 	public static function ours( \WP_REST_Request $request ): bool {
-		$route = $request->get_route();
-		return '/' . Urls::NAMESPACE === $route || str_starts_with( $route, '/' . Urls::NAMESPACE . '/' );
+		return 1 === preg_match( '@^/' . preg_quote( Urls::NAMESPACE, '@' ) . '(?:/|$)@i', (string) $request->get_route() );
 	}
 
 	/**

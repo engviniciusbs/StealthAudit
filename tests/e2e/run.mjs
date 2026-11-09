@@ -324,6 +324,10 @@ try {
     const jsonp = await req.get(`${BASE}/?rest_route=/stealthaudit/v1/events&_jsonp=x`);
     out._jsonp = jsonp.status();
     check(!(await jsonp.text()).includes('items'), 'jsonp leaked');
+    // WordPress matches routes case-insensitively: a case variant gets the same transport refusal.
+    const variant = await req.get(`${BASE}/?rest_route=/StealthAudit/V1/Events&_jsonp=x`);
+    out._jsonpCaseVariant = variant.status();
+    check(variant.status() === 400 && variant.headers()['cache-control'].includes('no-store') && !(await variant.text()).includes('items'), `case-variant jsonp gave ${variant.status()}`);
     return out;
   });
 
@@ -573,11 +577,13 @@ try {
     // Core's CORS grant is stripped for our namespace, so the credentialed fetch is unreadable.
     check(seen.read === 'blocked', `cross-site fetch could read the status: ${seen.read}`);
     const cors = {};
-    for (const method of ['GET', 'OPTIONS']) {
-      const r = await req.fetch(`${BASE}/?rest_route=/stealthaudit/v1/events`, { method, headers: { Origin: attacker.origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-wp-nonce' } });
-      const h = r.headers();
-      check(!('access-control-allow-origin' in h) && !('access-control-allow-credentials' in h), `${method} kept CORS: ${JSON.stringify(h)}`);
-      cors[method] = r.status();
+    for (const route of ['/stealthaudit/v1/events', '/StealthAudit/v1/events', '/STEALTHAUDIT/V1/STATUS']) {
+      for (const method of ['GET', 'OPTIONS']) {
+        const r = await req.fetch(`${BASE}/?rest_route=${route}`, { method, headers: { Origin: attacker.origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-wp-nonce' } });
+        const h = r.headers();
+        check(!('access-control-allow-origin' in h) && !('access-control-allow-credentials' in h) && (h['cache-control'] || '').includes('no-store'), `${method} ${route} kept CORS or lost no-store: ${JSON.stringify(h)}`);
+        cors[`${method} ${route}`] = r.status();
+      }
     }
     // Control: a core route keeps WordPress's CORS grant (OPTIONS, so the test cache never stores it).
     const core = await req.fetch(`${BASE}/?rest_route=/`, { method: 'OPTIONS', headers: { Origin: attacker.origin, 'Access-Control-Request-Method': 'GET' } });
@@ -804,9 +810,19 @@ try {
     const rest = await page.getAttribute('[data-sa-root]', 'data-rest');
     check(response.status() === 200 && Array.isArray(json.items) && links.every((l) => l.startsWith(`${BASE}/stealthaudit/`)), `pretty ${response.status()} ${links}`);
     check(rest === `${BASE}/wp-json/stealthaudit/v1/`, rest);
+    // The pretty REST path in another case reaches the same handlers and keeps every namespace control.
+    const variants = {};
+    for (const path of ['/wp-json/StealthAudit/v1/events?_jsonp=x', '/wp-json/STEALTHAUDIT/V1/STATUS']) {
+      const r = await req.fetch(`${BASE}${path}`, { headers: { Origin: 'https://evil.example' } });
+      const h = r.headers();
+      const body = await r.text();
+      check(!('access-control-allow-origin' in h) && !('access-control-allow-credentials' in h) && (h['cache-control'] || '').includes('no-store') && /stealthaudit_/.test(body) && !body.includes('items'), `${path}: ${r.status()} ${JSON.stringify(h)}`);
+      variants[path] = r.status();
+    }
+    check(variants['/wp-json/StealthAudit/v1/events?_jsonp=x'] === 400, `pretty case-variant jsonp gave ${JSON.stringify(variants)}`);
     const inspect = JSON.parse(fixture('inspect'));
     await page.close();
-    return { status: 200, tabs: links.map((l) => l.replace(BASE, '')), rest: rest.replace(BASE, ''), rules: inspect.rules };
+    return { status: 200, tabs: links.map((l) => l.replace(BASE, '')), rest: rest.replace(BASE, ''), rules: inspect.rules, caseVariants: variants };
   });
 
   await step('Endpoint changed in config (/painel-ops): leased one-time flush, new links, old path no longer the panel', async () => {

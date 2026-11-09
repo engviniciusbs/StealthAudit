@@ -347,6 +347,84 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 		}
 	}
 
+	/**
+	 * WordPress matches routes case-insensitively ('@^route$@i', where "$" also accepts a final
+	 * newline), so every variant it dispatches to our handlers must get the namespace hardening.
+	 */
+	public function test_case_variant_routes_get_the_namespace_hardening(): void {
+		$variants = array(
+			array( 'GET', '/StealthAudit/v1/events' ),
+			array( 'GET', '/STEALTHAUDIT/V1/STATUS' ),
+			array( 'GET', '/stealthaudit/V1/Errors' ),
+			array( 'POST', '/Stealthaudit/v1/revoke' ),
+			array( 'GET', "/stealthaudit/v1/events\n" ),
+		);
+		foreach ( $variants as [ $method, $route ] ) {
+			$this->assert_hardened_route( $method, $route );
+		}
+		foreach ( array( '/wp/v2/users', '/stealthauditx/v1/events', '/stealthaudit/v10/events', '/x/stealthaudit/v1/events', '/stealthaudit' ) as $foreign ) {
+			self::assertFalse( Api::ours( new WP_REST_Request( 'GET', $foreign ) ), $foreign );
+			self::assertSame( 0, $this->api->json_options( 0, new WP_REST_Request( 'GET', $foreign ) ), $foreign );
+		}
+	}
+
+	/** The pretty /wp-json/ path and the rest_route query var both reach the same hardened routes. */
+	public function test_case_variant_routes_from_pretty_path_and_query_var_are_hardened(): void {
+		global $wp_rewrite, $wp_filter;
+		$structure = (string) get_option( 'permalink_structure' );
+		$rules = get_option( 'rewrite_rules' );
+		$hooks = $wp_filter['parse_request'] ?? null;
+		// parse_request must not serve the REST request (rest_api_loaded would exit).
+		unset( $wp_filter['parse_request'] );
+		// rest_api_init() registers rest_route on the global WP only; parse() uses a new WP.
+		$rest_var = static fn ( array $vars ): array => array_merge( $vars, array( 'rest_route' ) );
+		add_filter( 'query_vars', $rest_var );
+		try {
+			$wp_rewrite->set_permalink_structure( '/%postname%/' );
+			flush_rewrite_rules( false );
+			$pretty = $this->parse( '/wp-json/StealthAudit/v1/events' )->query_vars['rest_route'] ?? null;
+			self::assertSame( '/StealthAudit/v1/events', $pretty );
+			$wp_rewrite->set_permalink_structure( '' );
+			$plain = $this->parse( '/?rest_route=/STEALTHAUDIT/v1/Status', array( 'rest_route' => '/STEALTHAUDIT/v1/Status' ) )->query_vars['rest_route'] ?? null;
+			self::assertSame( '/STEALTHAUDIT/v1/Status', $plain );
+		} finally {
+			remove_filter( 'query_vars', $rest_var );
+			if ( null !== $hooks ) {
+				$wp_filter['parse_request'] = $hooks;
+			}
+			$wp_rewrite->set_permalink_structure( $structure );
+			update_option( 'rewrite_rules', $rules );
+		}
+		// rest_api_loaded() passes the query var through untrailingslashit() as the route.
+		$this->assert_hardened_route( 'GET', untrailingslashit( $pretty ) );
+		$this->assert_hardened_route( 'GET', untrailingslashit( $plain ) );
+	}
+
+	/**
+	 * Real Apache of this wp-env environment, plain HTTP: core's CORS grant must be removed and
+	 * the JSONP transport refused for case variants too, preflight included. Not real TLS: the
+	 * Guard answers 403 to plain HTTP, which is fine here (no data path is exercised).
+	 */
+	public function test_case_variant_routes_over_real_http_drop_cors_and_reject_jsonp(): void {
+		$base = rtrim( (string) ( getenv( 'STEALTHAUDIT_TEST_WEB_URL' ) ?: 'http://wordpress' ), '/' );
+		$origin = array( 'Origin: https://evil.example' );
+		$preflight = array_merge( $origin, array( 'Access-Control-Request-Method: GET', 'Access-Control-Request-Headers: x-wp-nonce' ) );
+		// Control: a core route keeps the CORS grant, so the probe can see it at all.
+		$control = $this->http( 'OPTIONS', $base . '/?rest_route=/wp/v2/types', $preflight );
+		self::assertSame( 'https://evil.example', $control['headers']['access-control-allow-origin'] ?? null, 'web server not reachable as ' . $base . ' or core CORS changed; set STEALTHAUDIT_TEST_WEB_URL' );
+		foreach ( array( '/StealthAudit/v1/events', '/STEALTHAUDIT/V1/STATUS', '/stealthaudit/v1/events' ) as $route ) {
+			$jsonp = $this->http( 'GET', $base . '/?rest_route=' . rawurlencode( $route ) . '&_jsonp=cb', $origin );
+			self::assertSame( 400, $jsonp['status'], $route );
+			self::assertStringContainsString( 'stealthaudit_invalid_request', $jsonp['body'], $route );
+			self::assertStringNotContainsString( 'items', $jsonp['body'] );
+			foreach ( array( $jsonp, $this->http( 'GET', $base . '/?rest_route=' . rawurlencode( $route ), $origin ), $this->http( 'OPTIONS', $base . '/?rest_route=' . rawurlencode( $route ), $preflight ) ) as $response ) {
+				self::assertArrayNotHasKey( 'access-control-allow-origin', $response['headers'], $route );
+				self::assertArrayNotHasKey( 'access-control-allow-credentials', $response['headers'], $route );
+				self::assertStringContainsString( 'no-store', $response['headers']['cache-control'] ?? '', $route );
+			}
+		}
+	}
+
 	public function test_location_is_estimated_at_read_time_and_never_stored(): void {
 		$source = dirname( __DIR__, 2 ) . '/artifacts/geoip/GeoIP2-City-Test.mmdb';
 		self::assertFileExists( $source, 'Run node tools/geoip-test-data.mjs (the npm test scripts do it).' );
@@ -953,6 +1031,69 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 	private function budget( string $kind, array $changes ): void {
 		$row = $this->storage->state->get( 'budget:' . $kind, $this->now );
 		self::assertTrue( $this->storage->state->compare_and_swap( 'budget:' . $kind, $row['revision'], $changes + $row['payload'], null, $this->now ) );
+	}
+
+	/**
+	 * A route WordPress dispatches to our handlers gets every namespace control: it reaches our
+	 * code (not rest_no_route), transport parameters are refused, private headers and hex JSON
+	 * apply, and the CORS filter treats it as ours.
+	 */
+	private function assert_hardened_route( string $method, string $route ): void {
+		$label = wp_json_encode( $route );
+		$make = function ( array $query ) use ( $method, $route ): WP_REST_Request {
+			$request = new WP_REST_Request( $method, $route );
+			$request->set_query_params( $query );
+			$request->set_header( 'X-StealthAudit-Nonce', $this->nonce );
+			if ( 'POST' === $method ) {
+				$request->set_header( 'Content-Type', 'application/json' );
+				$request->set_body( '' );
+			}
+			return $request;
+		};
+		$_SERVER['REQUEST_METHOD'] = $method;
+		self::assertTrue( Api::ours( $make( array() ) ), $label );
+		$routed = $this->dispatch( $make( array() ) );
+		$code = (string) ( $routed->get_data()['code'] ?? '' );
+		self::assertTrue( 200 === $routed->get_status() || str_starts_with( $code, 'stealthaudit_' ), $label . ' was not dispatched to StealthAudit: ' . wp_json_encode( $routed->get_data() ) );
+		foreach ( array( '_jsonp' => 'cb', '_embed' => '1', '_fields' => 'id', '_envelope' => '1', '_wpnonce' => 'x' ) as $param => $value ) {
+			$this->assert_denied( $this->dispatch( $make( array( $param => $value ) ) ), 400, 'stealthaudit_invalid_request' );
+		}
+		self::assertSame( JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT, $this->api->json_options( 0, $make( array() ) ), $label );
+		self::assertFalse( $this->api->strip_cors( false, null, $make( array() ) ) );
+		$this->assert_private_headers();
+	}
+
+	/**
+	 * Plain HTTP request without WordPress's HTTP API (no filters): status, lower-cased headers, body.
+	 *
+	 * @param list<string> $headers Request headers.
+	 * @return array{status:int,headers:array<string,string>,body:string}
+	 */
+	private function http( string $method, string $url, array $headers ): array {
+		$received = array();
+		$curl = curl_init( $url );
+		curl_setopt_array(
+			$curl,
+			array(
+				CURLOPT_CUSTOMREQUEST  => $method,
+				CURLOPT_HTTPHEADER     => $headers,
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_FOLLOWLOCATION => false,
+				CURLOPT_CONNECTTIMEOUT => 10,
+				CURLOPT_TIMEOUT        => 60,
+				CURLOPT_HEADERFUNCTION => static function ( $handle, string $line ) use ( &$received ): int {
+					$parts = explode( ':', $line, 2 );
+					if ( 2 === count( $parts ) ) {
+						$received[ strtolower( trim( $parts[0] ) ) ] = trim( $parts[1] );
+					}
+					return strlen( $line );
+				},
+			)
+		);
+		$body = curl_exec( $curl );
+		$status = (int) curl_getinfo( $curl, CURLINFO_RESPONSE_CODE );
+		curl_close( $curl );
+		return array( 'status' => $status, 'headers' => $received, 'body' => is_string( $body ) ? $body : '' );
 	}
 
 	private function parse( string $uri, array $get = array() ): WP {
