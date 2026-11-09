@@ -6,7 +6,7 @@
 //
 //   npm run package                                   dist/stealthaudit-<version>.zip (+ .sha256, .contents.txt, .build.json)
 //   npm run package -- --allow-dirty                  include uncommitted TRACKED changes (marked dirty; not a release)
-//   npm run package -- --package-version 0.1.0-dev+update --out artifacts/package-e2e   test-only marker build
+//   npm run package -- --package-version 0.1.0+update --out artifacts/package-e2e   test-only marker build
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

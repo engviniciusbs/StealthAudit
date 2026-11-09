@@ -3,7 +3,7 @@
 // Verify a distribution ZIP built by tools/package.php (build tooling, never shipped).
 //
 //   npm run verify-package                       newest dist/stealthaudit-*.zip
-//   npm run verify-package -- dist/stealthaudit-0.1.0-dev.zip [--against-source]
+//   npm run verify-package -- dist/stealthaudit-0.1.0.zip [--against-source]
 //
 // Checks: SHA-256 file and content list match the ZIP; entry names, types and permissions;
 // required layout; nothing outside the allowed top level; excluded paths (tests, tools,

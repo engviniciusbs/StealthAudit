@@ -2,7 +2,7 @@
 /**
  * Plugin Name: StealthAudit
  * Description: Operator-managed audit and diagnostics (must-use loader).
- * Version: 0.1.0-dev
+ * Version: 0.1.0
  * Requires PHP: 8.3
  * License: GPL-3.0-or-later
  * SPDX-License-Identifier: GPL-3.0-or-later

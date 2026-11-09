@@ -5,7 +5,7 @@
 // tree with `git archive` and runs this file with PHP 8.3 + Composer in the wp-env CLI container:
 //
 //   php tools/package.php --archive=build/package-source.tar --commit=<sha> --dirty=0|1
-//                         --source-date-epoch=<commit time> [--package-version=0.1.0-dev+marker] [--out=dist]
+//                         --source-date-epoch=<commit time> [--package-version=0.1.0+marker] [--out=dist]
 //
 // Steps: validate the archive against the package layout -> composer validate/install --no-dev/
 // audit/check-platform-reqs/licenses in a temporary copy -> prune vendor to runtime files ->
