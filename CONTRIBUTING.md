@@ -6,7 +6,7 @@ Obrigado pelo interesse. Este guia cobre o ambiente, os testes e o formato das m
 
 ## Antes de começar
 
-- Leia o [design aprovado](docs/specs/2026-11-07-stealthaudit-design.md) e os [limites de segurança](README.md#limites-de-segurança). Mudanças que ampliem o que é coletado (conteúdo, senhas, corpos de requisição), que abram o painel sem a política completa ou que enviem IPs para fora do servidor contrariam o design e não serão aceitas.
+- Leia o [design aprovado](docs/specs/2026-11-07-stealthaudit-design.md) e [o que o StealthAudit não faz](README.md#o-que-o-stealthaudit-não-faz). Mudanças que ampliem o que é coletado (conteúdo, senhas, corpos de requisição), que abram o painel sem a política completa ou que enviem IPs para fora do servidor contrariam o design e não serão aceitas.
 - Para mudanças grandes, abra uma issue antes, descrevendo o problema e a proposta.
 - Suporte só é declarado onde há teste: uma mudança que diz suportar algo novo precisa trazer a evidência ([compatibility.md](docs/testing/compatibility.md)).
 

@@ -35,7 +35,7 @@ Interessam especialmente:
 - uma falha da coleta que derrube o site ou quebre a resposta pública;
 - problemas no pacote ZIP (arquivo sensível incluído, dependência sem prefixo que colida com outro plugin).
 
-Fora do escopo, por decisão de projeto ([README](README.md#limites-de-segurança)): quem já pode executar PHP, instalar plugins, editar arquivos ou o banco, ou controla o servidor, consegue desativar ou contornar a coleta. Um plugin must-use visível na tela de plugins também não é vulnerabilidade. Problemas da hospedagem, do WordPress ou de bibliotecas de terceiros devem ser relatados aos respectivos projetos; avise aqui se o StealthAudit precisar reagir.
+Fora do escopo, por decisão de projeto ([README](README.md#o-que-o-stealthaudit-não-faz)): quem já pode executar PHP, instalar plugins, editar arquivos ou o banco, ou controla o servidor, consegue desativar ou contornar a coleta. Um plugin must-use visível na tela de plugins também não é vulnerabilidade. Problemas da hospedagem, do WordPress ou de bibliotecas de terceiros devem ser relatados aos respectivos projetos; avise aqui se o StealthAudit precisar reagir.
 
 ## Integridade do pacote
 
