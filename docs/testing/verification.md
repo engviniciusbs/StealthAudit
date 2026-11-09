@@ -182,3 +182,19 @@ Executado em 2026-11-09. Notas da versão, SHA-256 do pacote, limitações conhe
   - Plugin Check: 4 ocorrências justificadas. Log do Apache: 1.204 linhas, 0 diagnósticos PHP.
 - Suítes no 8880 depois do `test:package`: unidade 215 / 653 / 1 skip; integração 90 / 3.024; concorrência 15 / 229; `quality` sem erros; e2e 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
 - A matriz e o benchmark não foram repetidos; o produto só mudou em `Runtime::VERSION` e no cabeçalho do loader desde a 8c.
+
+## Rodada final de correção (revisão final do ramo)
+
+- **Rotas com outra caixa.** O WordPress casa rotas REST com `@^rota$@i`, então `/StealthAudit/v1/…` chegava aos handlers sem o endurecimento do namespace (CORS do core, `_jsonp` e afins aceitos, erros sem `no-store`). `Api::ours()` agora usa as mesmas regras.
+  - Novos testes de integração (no processo e por HTTP real contra o Apache do ambiente) e checagens no e2e, por `rest_route` e por `/wp-json/`. Os testes de integração falham sem a correção.
+  - Observado no 8880, por HTTP simples: `/?rest_route=/StealthAudit/v1/events&_jsonp=cb` com `Origin` estranho dá 400 com `no-store` e sem `Access-Control-Allow-Origin`; o preflight `OPTIONS` de `/STEALTHAUDIT/V1/STATUS` sai sem o CORS; o controle `/wp/v2/types` mantém o CORS do core.
+- **Injeção de falhas.** O teste de perda do banco separa o orçamento de trabalho da escrita saudável e confere que a escrita com falha chegou ao `wpdb` (> 900 ms).
+- **Pacote.** `npm run package` no commit `31399e8`: SHA-256 `fdf1046f199296dcef9ffd95272a90edb581e271fc1c22b44581d6b5df787890`, 222 arquivos, 471.862 bytes, `dirty: false`; `verify-package --against-source` OK.
+- **`test:package` sobre esse ZIP: interrompido.** Os passos 1–7 passaram (rebuild idêntico, 18/18 cópias adulteradas rejeitadas). No passo 8 o processo foi encerrado por falta de memória no host. O ambiente parcial (8883) foi removido à mão, e a execução não foi repetida. O registro de 25/25 continua sendo o do ZIP anterior `fc358e7b…fea3`.
+- **Suítes no 8880:**
+  - unidade: 215 / 653 / 1 skip;
+  - integração: 93 / 3.757;
+  - concorrência, duas execuções: 15 / 230 cada (na primeira, a escrita saudável levou 142 ms e o teste passou);
+  - `quality`: sem erros;
+  - e2e: 35 aprovados, 0 falhas, site restaurado.
+  - Saídas sem avisos PHP.
