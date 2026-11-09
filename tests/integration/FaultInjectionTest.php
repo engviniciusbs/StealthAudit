@@ -294,6 +294,9 @@ final class FaultInjectionTest extends PHPUnit\Framework\TestCase {
 		$late = json_decode( trim( $rest ), true, 4, JSON_THROW_ON_ERROR );
 		self::assertTrue( $late['healthy'] );
 		self::assertFalse( $late['first'] );
+		// The faulted write reached wpdb and paid its reconnect attempts (sleep(1) between them),
+		// so the refusal is the database loss, not a work budget already spent (~0.1 ms).
+		self::assertGreaterThan( 900, $late['first_ms'], 'the faulted write never reached the database' );
 		self::assertFalse( $late['second'] );
 		self::assertSame( 0, $late['second_sql'] );
 

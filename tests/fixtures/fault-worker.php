@@ -69,15 +69,18 @@ switch ( $input['mode'] ) {
 		break;
 
 	case 'outage':
-		// Default product limits (100 ms work budget): this is one ordinary request.
-		$storage = new StealthAudit\Storage\Storage( $fault_connection, StealthAudit\Config\Configuration::from_array( array() ) );
 		if ( $input['after_template_redirect'] ) {
 			// wpdb::check_connection() returns false instead of dead_db() once this action ran.
 			do_action( 'template_redirect' );
 		}
+		// Precondition: the connection works. This write uses its own Storage (its own work
+		// budget): on a loaded host it can take longer than the 100 ms budget, and spending it
+		// here would turn the faulted write below into a budget refusal that never reaches SQL.
 		$started = hrtime( true );
-		$healthy = $storage->events->append( $fault_event, time() );
+		$healthy = ( new StealthAudit\Storage\Storage( $fault_connection, StealthAudit\Config\Configuration::from_array( array() ) ) )->events->append( $fault_event, time() );
 		$out     = array( 'healthy' => $healthy, 'healthy_ms' => $fault_ms( $started ) );
+		// The request under test: default product limits (100 ms work budget), nothing spent yet.
+		$storage = new StealthAudit\Storage\Storage( $fault_connection, StealthAudit\Config\Configuration::from_array( array() ) );
 		// The server drops this session and every reconnect is refused: an unreachable database.
 		$killer = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 		$killer->query( $killer->prepare( 'KILL CONNECTION %d', (int) $fault_connection->get_var( 'SELECT CONNECTION_ID()' ) ) );
