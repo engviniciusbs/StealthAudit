@@ -173,7 +173,7 @@ Executado em 2026-11-09. Notas da versão, SHA-256 do pacote, limitações conhe
 
 - Versão 0.1.0 em `Runtime::VERSION`, no cabeçalho do loader, no `package.json` e no `package-lock.json`. `LoaderTest` passou a conferir também os dois campos do `package-lock.json`, e o build recusa versões divergentes.
 - Itens da re-revisão 8c: N1, os literais sem bytes CR/LF crus; N2, o passo de atualização do `test:package` passa a afirmar opcache ligado e mtime igual; N3, a versão do PHP-Scoper vem de uma constante só; N4, dois casos adulterados nas notices (18 no total); N5 e N6 nos documentos.
-- `npm run package` no commit `36f6391`: `dist/stealthaudit-0.1.0.zip`, SHA-256 `fc358e7bc7d7bf3d6d666d8cd553fca02f06b4c2ee07c25da26a0a14ffc7fea3`, 222 arquivos, 471.614 bytes, `dirty: false`. `verify-package --against-source` OK.
+- `npm run package` no commit `36f6391`: `dist/stealthaudit-0.1.0.zip`, SHA-256 `fc358e7bc7d7bf3d6d666d8cd553fca02f06b4c2ee07c25da26a0a14ffc7fea3` (**substituído** pela rodada final abaixo, nunca publicado), 222 arquivos, 471.614 bytes, `dirty: false`. `verify-package --against-source` OK.
 - `npm run test:package` (uma execução, ambiente adicional 8883 destruído ao final): **25/25** passos.
   - Rebuild idêntico; 18/18 cópias adulteradas rejeitadas.
   - E2E pelo artefato 35/35, e de novo com outro plugin carregado antes 35/35.
@@ -190,7 +190,7 @@ Executado em 2026-11-09. Notas da versão, SHA-256 do pacote, limitações conhe
   - Observado no 8880, por HTTP simples: `/?rest_route=/StealthAudit/v1/events&_jsonp=cb` com `Origin` estranho dá 400 com `no-store` e sem `Access-Control-Allow-Origin`; o preflight `OPTIONS` de `/STEALTHAUDIT/V1/STATUS` sai sem o CORS; o controle `/wp/v2/types` mantém o CORS do core.
 - **Injeção de falhas.** O teste de perda do banco separa o orçamento de trabalho da escrita saudável e confere que a escrita com falha chegou ao `wpdb` (> 900 ms).
 - **Pacote.** `npm run package` no commit `31399e8`: SHA-256 `fdf1046f199296dcef9ffd95272a90edb581e271fc1c22b44581d6b5df787890`, 222 arquivos, 471.862 bytes, `dirty: false`; `verify-package --against-source` OK.
-- **`test:package` sobre esse ZIP: interrompido.** Os passos 1–7 passaram (rebuild idêntico, 18/18 cópias adulteradas rejeitadas). No passo 8 o processo foi encerrado por falta de memória no host. O ambiente parcial (8883) foi removido à mão, e a execução não foi repetida. O registro de 25/25 continua sendo o do ZIP anterior `fc358e7b…fea3`.
+- **`test:package` sobre esse ZIP: 25/25 passos.** Uma primeira tentativa parou no passo 8 por falta de memória no host (ambiente parcial 8883 removido à mão). A segunda execução, do zero, passou em todos os passos: rebuild idêntico, 18/18 cópias adulteradas rejeitadas, e2e pelo artefato 35/35 e com outro plugin carregado antes 35/35, atualização A → B com B executando após o reload, CLI empacotado (recusa, rotação, validação, reset), Plugin Check com 4 ocorrências justificadas. Ambiente adicional destruído ao final.
 - **Suítes no 8880:**
   - unidade: 215 / 653 / 1 skip;
   - integração: 93 / 3.757;

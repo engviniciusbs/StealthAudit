@@ -36,7 +36,7 @@ Use sempre `tools/wp-env.cjs` (os scripts `npm` já usam). Ele publica as portas
 | `npm run package` / `npm run verify-package` | ZIP de distribuição e sua verificação ([package.md](docs/testing/package.md)) |
 | `npm run test:package` | instala o ZIP num WordPress limpo e roda o fluxo completo (≈ 30 min, ambiente adicional) |
 
-Uma mudança em `src/`, `templates/`, `assets/`, `bin/` ou no loader precisa passar em `test:unit`, `test:integration`, `quality` e, se tocar o painel, `test:e2e`. Mudanças no build ou no empacotamento passam também em `package`, `verify-package -- --against-source` e `test:package`. `benchmark` e `test:package` conferem o espaço livre em disco antes de começar; a matriz não confere. Os três destroem o ambiente adicional ao final, exceto a matriz com `--keep`. Se uma execução for interrompida, veja [verification.md](docs/testing/verification.md#execução-interrompida).
+Uma mudança em `src/`, `templates/`, `assets/`, `bin/` ou no loader precisa passar em `test:unit`, `test:integration`, `quality` e, se tocar o painel, `test:e2e`. Mudanças no build ou no empacotamento passam também em `package`, `verify-package -- --against-source` e `test:package`. `benchmark` e `test:package` conferem o espaço livre em disco antes de começar; a matriz não confere. Os três destroem o ambiente adicional ao final, exceto quando chamados com `--keep` (aceito pelos três). Se uma execução for interrompida, veja [verification.md](docs/testing/verification.md#execução-interrompida).
 
 Regras para os testes:
 
