@@ -476,9 +476,13 @@ try {
     let served = await probe();
     for (let i = 0; i < 5; i++) served = await probe(); // compile and cache A in the Apache workers reached
     check(served.runtime_version === version && served.boot === 'ready', `before update the site runs ${JSON.stringify(served)}`);
+    // The step only proves something about the reload when opcache caches A: assert it, not just record it.
+    check(served.opcache_enabled === true, `opcache is off in the web container: ${JSON.stringify(served)}`);
     install(B.zip, { update: true });
     const files = matchesContents(B.zip.replace(/\.zip$/, '.contents.txt'));
     const mtimeB = web(`stat -c %Y ${runtimeFile}`).stdout;
+    // Same packaged inputs, same entry times: the case where only a reload makes opcache see B.
+    check(mtimeA !== '' && mtimeA === mtimeB, `Runtime.php mtime differs between A (${mtimeA}) and B (${mtimeB})`);
     const beforeReload = [];
     for (let i = 0; i < 4; i++) beforeReload.push((await probe()).runtime_version);
     // docs/operations/installation.md: reload PHP (here Apache + mod_php) after the swap.

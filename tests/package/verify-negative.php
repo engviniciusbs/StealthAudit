@@ -36,6 +36,8 @@ $cases = array(
 	'modification notice removed'  => array( $edit( $core . 'vendor/geoip2/geoip2/src/Database/Reader.php', static fn ( string $c ): string => str_replace( STEALTHAUDIT_PACKAGE_NOTICE . "\n", '', $c ) ), 'Modification notice missing' ),
 	'Composer runtime in product'  => array( $edit( $core . 'src/Bootstrap/Runtime.php', static fn ( string $c ): string => str_replace( 'use Throwable;', "use Throwable;\nuse Composer\\Autoload\\ClassLoader;", $c ) ), "names Composer's runtime" ),
 	'Runtime::VERSION mismatch'    => array( $edit( $core . 'src/Bootstrap/Runtime.php', static fn ( string $c ): string => preg_replace( "/public const VERSION = '[^']+';/", "public const VERSION = '9.9.9';", $c ) ), 'Runtime::VERSION' ),
+	'notices statement removed'    => array( $edit( $core . 'THIRD-PARTY-NOTICES.md', static fn ( string $c ): string => str_replace( 'Modified files: in the distribution ZIP every bundled third-party PHP file', 'Files: in the distribution ZIP every bundled third-party PHP file', $c ) ), 'lacks the modified-files statement' ),
+	'notices Composer section cut' => array( $edit( $core . 'THIRD-PARTY-NOTICES.md', static fn ( string $c ): string => str_replace( '## Composer autoloader runtime (composer/composer)', '## Autoloader', $c ) ), 'lacks the modified-files statement' ),
 	'license file removed'         => array( static fn ( ZipArchive $z ) => $z->deleteName( $core . 'vendor/psr/clock/LICENSE' ), 'without its license' ),
 	'PHP syntax error'             => array( $edit( $core . 'templates/panel.php', static fn ( string $c ): string => $c . "\n<?php if ( {\n" ), 'php -l failed' ),
 );
