@@ -106,6 +106,10 @@ Depois das correções, executadas de novo: `npm run test:unit` 200 testes, 580 
 - O tema ativo do site de testes é `default`, que não existe; para usuários logados o core responde 500 "The theme directory "default" does not exist" fora do painel (por exemplo `/favicon.ico/` e `/stealthaudit/` quando não é o painel). É estado do ambiente, não do plugin, e foi preservado.
 - A variante "A verificação expirou" aparece quando a consulta da própria página encontra a prova vencida; ao recarregar uma página vencida o servidor já mostra o desafio comum com o aviso de filtros (checagem 18). Ambos preservam filtros sem exibir dados.
 
+## Intermitências conhecidas do harness
+
+- **"Outsider" sem POST de login (fase 8c).** Numa execução no site limpo do pacote (`npm run test:package`), o passo "Outsider" estourou 30 s: o log do Apache mostra a página de login carregada e nenhum `POST /wp-login.php`. As execuções seguintes passaram. O passo agora espera a URL do wp-login, o evento `load` e o botão visível antes de preencher. Se voltar a falhar, conferir no log do Apache se o POST chegou antes de suspeitar do produto.
+
 ## Limpeza
 
 O `finally` executa `teardown` e `restore`; o `restore` compara `wp-config.php` (bytes), options (todas, ordenadas), usuários, tabela de estado e maior id de eventos/erros com o snapshot e falha se algo divergir. Também remove o link `/blog`, os posts criados e `artifacts/e2e/{snapshot,state}.json`. Efeitos que não voltam: contadores AUTO_INCREMENT de usuários, posts e eventos avançaram.

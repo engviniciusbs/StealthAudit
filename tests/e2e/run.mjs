@@ -732,6 +732,11 @@ try {
     const ctx = await newContext();
     const page = watch(await ctx.newPage());
     await page.goto(panelUrl());
+    // One run on the clean artifact site timed out with the login POST never sent; make sure the
+    // redirected wp-login page has finished loading and the button is usable before typing.
+    await page.waitForURL((u) => u.pathname.endsWith('/wp-login.php'));
+    await page.waitForLoadState('load');
+    await page.locator('#wp-submit').waitFor({ state: 'visible' });
     await page.fill('#user_login', outsider.login);
     await page.fill('#user_pass', outsider.password);
     const [response] = await Promise.all([page.waitForResponse((r) => r.url().includes('stealthaudit=panel') && r.request().resourceType() === 'document'), page.click('#wp-submit')]);
