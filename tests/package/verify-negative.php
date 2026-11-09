@@ -8,6 +8,7 @@
 if ( 'cli' !== PHP_SAPI ) {
 	exit( 1 );
 }
+require dirname( __DIR__, 2 ) . '/tools/package-lib.php';
 $repo = dirname( __DIR__, 2 );
 $good = $repo . '/' . ( $argv[1] ?? '' );
 if ( ! preg_match( '/^stealthaudit-(.+)\.zip$/', basename( $good ), $match ) || ! is_file( $good ) ) {
@@ -32,6 +33,9 @@ $cases = array(
 	// The PHP-Scoper miss found in phase 8c: MaxMind\Db\Reader is in its extension stubs.
 	'unprefixed import in vendor'  => array( $edit( $core . 'vendor/geoip2/geoip2/src/Database/Reader.php', static fn ( string $c ): string => str_replace( 'use StealthAuditVendor\MaxMind\Db\Reader as DbReader;', 'use MaxMind\Db\Reader as DbReader;', $c ) ), 'is not prefixed' ),
 	'shared Composer ClassLoader'  => array( $edit( $core . 'vendor/composer/ClassLoader.php', static fn ( string $c ): string => str_replace( 'namespace StealthAuditVendor\Composer\Autoload;', 'namespace Composer\Autoload;', $c ) ), 'Unprefixed' ),
+	'modification notice removed'  => array( $edit( $core . 'vendor/geoip2/geoip2/src/Database/Reader.php', static fn ( string $c ): string => str_replace( STEALTHAUDIT_PACKAGE_NOTICE . "\n", '', $c ) ), 'Modification notice missing' ),
+	'Composer runtime in product'  => array( $edit( $core . 'src/Bootstrap/Runtime.php', static fn ( string $c ): string => str_replace( 'use Throwable;', "use Throwable;\nuse Composer\\Autoload\\ClassLoader;", $c ) ), "names Composer's runtime" ),
+	'Runtime::VERSION mismatch'    => array( $edit( $core . 'src/Bootstrap/Runtime.php', static fn ( string $c ): string => preg_replace( "/public const VERSION = '[^']+';/", "public const VERSION = '9.9.9';", $c ) ), 'Runtime::VERSION' ),
 	'license file removed'         => array( static fn ( ZipArchive $z ) => $z->deleteName( $core . 'vendor/psr/clock/LICENSE' ), 'without its license' ),
 	'PHP syntax error'             => array( $edit( $core . 'templates/panel.php', static fn ( string $c ): string => $c . "\n<?php if ( {\n" ), 'php -l failed' ),
 );

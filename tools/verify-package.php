@@ -280,11 +280,25 @@ try {
 	if ( $loader_version !== $version ) {
 		$fail( "Loader Version ({$loader_version}) differs from the file name ({$version})." );
 	}
+	$runtime_version = preg_match( "/^	public const VERSION = '([^']+)';$/m", $files[ $core . 'src/Bootstrap/Runtime.php' ] ?? '', $m ) ? $m[1] : null;
+	if ( $runtime_version !== $version ) {
+		$fail( "Runtime::VERSION ({$runtime_version}) differs from the file name ({$version})." );
+	}
+	// Apache-2.0 §4(b): every shipped vendor PHP file carries the modification notice on line 2.
+	foreach ( $php as $name ) {
+		if ( str_starts_with( $name, $core . 'vendor/' ) && STEALTHAUDIT_PACKAGE_NOTICE !== ( explode( "
+", $files[ $name ], 3 )[1] ?? '' ) ) {
+			$fail( "Modification notice missing in {$name}" );
+		}
+	}
 	$license = $files[ $core . 'LICENSE' ] ?? '';
 	if ( ! str_contains( $license, 'GNU GENERAL PUBLIC LICENSE' ) || ! str_contains( $license, 'Version 3, 29 June 2007' ) ) {
 		$fail( 'LICENSE is not the GPL-3.0 text.' );
 	}
 	$notices = $files[ $core . 'THIRD-PARTY-NOTICES.md' ] ?? '';
+	if ( ! str_contains( $notices, 'Modified files: in the distribution ZIP every bundled third-party PHP file' ) || ! str_contains( $notices, '## Composer autoloader runtime (composer/composer)' ) ) {
+		$fail( 'THIRD-PARTY-NOTICES.md lacks the modified-files statement or the Composer runtime section.' );
+	}
 	$bundled = array();
 	foreach ( array_keys( $files ) as $name ) {
 		if ( preg_match( '#^mu-plugins/stealthaudit/vendor/([^/]+/[^/]+)/#', $name, $m ) && 'composer/' !== substr( $m[1], 0, 9 ) || preg_match( '#^mu-plugins/stealthaudit/vendor/(composer/ca-bundle)/#', $name, $m ) ) {
@@ -319,7 +333,7 @@ try {
 				$fail( "Differs from the working tree: {$name} ({$source})" );
 			}
 		}
-		foreach ( array( 'src', 'assets', 'templates' ) as $dir ) {
+		foreach ( array( 'src', 'assets', 'templates', 'bin' ) as $dir ) {
 			foreach ( stealthaudit_package_files( $repo . '/' . $dir ) as $file ) {
 				if ( ! isset( $files[ $core . $dir . '/' . $file ] ) ) {
 					$fail( "Working-tree file not packaged: {$dir}/{$file}" );

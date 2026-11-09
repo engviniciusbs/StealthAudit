@@ -5,7 +5,7 @@
 // tree with `git archive` and runs this file with PHP 8.3 + Composer in the wp-env CLI container:
 //
 //   php tools/package.php --archive=build/package-source.tar --commit=<sha> --dirty=0|1
-//                         [--package-version=0.1.0-dev+marker] [--out=dist]
+//                         --source-date-epoch=<commit time> [--package-version=0.1.0-dev+marker] [--out=dist]
 //
 // Steps: validate the archive against the package layout -> composer validate/install --no-dev/
 // audit/check-platform-reqs/licenses in a temporary copy -> prune vendor to runtime files ->
@@ -24,8 +24,11 @@ const STEALTHAUDIT_SCOPER_SHA256  = '5e35e4a89ea53b2c70a19bfa8a856e4f9080aa12eb1
 const STEALTHAUDIT_SCOPER_URL     = 'https://github.com/humbug/php-scoper/releases/download/0.18.20/php-scoper.phar';
 // Licenses compatible with distributing the bundle under GPL-3.0-or-later.
 const STEALTHAUDIT_LICENSES = array( 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'ISC' );
-// Fixed entry time (1980-02-01T00:00:00Z): the same commit always gives the same ZIP bytes.
-const STEALTHAUDIT_ZIP_MTIME = 318211200;
+// ZIP entry times are the commit time (--source-date-epoch from tools/package.mjs, like
+// SOURCE_DATE_EPOCH): the same commit always gives the same bytes, and a later release always has
+// later file times, so an mtime-preserving copy (unzip, rsync -a) cannot leave PHP's opcache
+// convinced that an updated file is the cached old one. installation.md still requires a PHP
+// reload / opcache reset after an update: two builds of one commit share their times.
 
 // Shipped from the archive, by package path. Everything else the archive holds must be listed
 // in $source_only (kept in the source archive, never shipped) or be export-ignored.
@@ -93,7 +96,7 @@ function stealthaudit_copy( string $from, string $to ): void {
 	}
 }
 
-$options = getopt( '', array( 'archive:', 'commit:', 'dirty:', 'package-version:', 'out:' ) );
+$options = getopt( '', array( 'archive:', 'commit:', 'dirty:', 'package-version:', 'out:', 'source-date-epoch:' ) );
 $repo    = dirname( __DIR__ );
 $temp    = null;
 try {
@@ -101,6 +104,10 @@ try {
 	$commit  = (string) ( $options['commit'] ?? '' );
 	$dirty   = '1' === (string) ( $options['dirty'] ?? '' );
 	$out_dir = $repo . '/' . trim( (string) ( $options['out'] ?? 'dist' ), '/' );
+	$mtime   = (int) ( $options['source-date-epoch'] ?? 0 );
+	if ( ! preg_match( '/^[0-9]{9,10}$/D', (string) ( $options['source-date-epoch'] ?? '' ) ) || $mtime < 315532800 || $mtime > 4102444800 ) {
+		throw new RuntimeException( 'Missing or invalid --source-date-epoch (the commit time; tools/package.mjs passes it).' );
+	}
 	if ( ! is_file( $repo . '/' . $archive ) || ! preg_match( '/^[0-9a-f]{40}$/D', $commit ) || ! preg_match( '#^[A-Za-z0-9._/-]+$#D', (string) ( $options['out'] ?? 'dist' ) ) || str_contains( (string) ( $options['out'] ?? '' ), '..' ) ) {
 		throw new RuntimeException( 'Usage: npm run package (see tools/package.mjs); archive, commit or output directory invalid.' );
 	}
@@ -137,17 +144,21 @@ try {
 	$loader         = (string) file_get_contents( $tree . '/loader/stealthaudit.php' );
 	$source_version = stealthaudit_package_loader_version( $loader );
 	$npm_version    = json_decode( (string) file_get_contents( $repo . '/package.json' ), true, 16, JSON_THROW_ON_ERROR )['version'] ?? null;
-	if ( null === $source_version || $source_version !== $npm_version ) {
-		throw new RuntimeException( "Loader version ({$source_version}) and package.json version ({$npm_version}) differ." );
+	$runtime_file    = $tree . '/src/Bootstrap/Runtime.php';
+	$runtime_version = preg_match( "/^	public const VERSION = '([^']+)';$/m", (string) file_get_contents( $runtime_file ), $m ) ? $m[1] : null;
+	if ( null === $source_version || $source_version !== $npm_version || $source_version !== $runtime_version ) {
+		throw new RuntimeException( "Loader ({$source_version}), Runtime::VERSION ({$runtime_version}) and package.json ({$npm_version}) versions differ." );
 	}
 	$version = (string) ( $options['package-version'] ?? $source_version );
 	if ( ! preg_match( '/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/D', $version ) ) {
 		throw new RuntimeException( "Invalid version {$version}." );
 	}
 	if ( $version !== $source_version ) {
-		// Test-only marker (package update test): the loader header carries it into the install.
+		// Test-only marker (package update test): the loader header and Runtime::VERSION, which runs
+		// on every request, carry it into the install.
 		$loader = preg_replace( '/^ \* Version: \S+$/m', ' * Version: ' . $version, $loader, 1 );
 		file_put_contents( $tree . '/loader/stealthaudit.php', $loader );
+		file_put_contents( $runtime_file, preg_replace( "/^	public const VERSION = '[^']+';$/m", "	public const VERSION = '" . $version . "';", (string) file_get_contents( $runtime_file ), 1 ) );
 	}
 	$log( "version {$version}" );
 
@@ -193,12 +204,7 @@ try {
 	$checks['composer licenses --no-dev'] = $inventory;
 	$log( 'composer: validate --strict, install --no-dev, audit, check-platform-reqs, licenses OK (' . count( $inventory ) . ' packages)' );
 
-	// ---------- notices from the lock must match the committed file ----------
-	$lock    = json_decode( (string) file_get_contents( $build . '/composer.lock' ), true, 512, JSON_THROW_ON_ERROR );
-	$notices = stealthaudit_third_party_notices( $lock, $build . '/vendor' );
-	if ( (string) file_get_contents( $tree . '/THIRD-PARTY-NOTICES.md' ) !== $notices ) {
-		throw new RuntimeException( 'THIRD-PARTY-NOTICES.md is stale: run php tools/notices.php and commit the result.' );
-	}
+	$lock = json_decode( (string) file_get_contents( $build . '/composer.lock' ), true, 512, JSON_THROW_ON_ERROR );
 	if ( ! str_starts_with( ltrim( (string) file_get_contents( $tree . '/LICENSE' ) ), 'GNU GENERAL PUBLIC LICENSE' ) || ! str_contains( (string) file_get_contents( $tree . '/LICENSE' ), 'Version 3, 29 June 2007' ) ) {
 		throw new RuntimeException( 'LICENSE is not the GPL-3.0 text.' );
 	}
@@ -393,6 +399,30 @@ try {
 	}
 	$log( "autoloader regenerated; Composer runtime references moved: {$moved}; files identifiers: {$identifiers}" );
 
+	// ---------- Apache-2.0 §4(b): every modified vendor file says so ----------
+	$marked = 0;
+	foreach ( stealthaudit_package_files( $core . '/vendor' ) as $file ) {
+		if ( ! str_ends_with( $file, '.php' ) ) {
+			continue;
+		}
+		$code = (string) file_get_contents( $core . '/vendor/' . $file );
+		if ( ! preg_match( '/^<\?php?
+/', $code ) ) {
+			throw new RuntimeException( "vendor/{$file} does not start with '<?php' on its own line." );
+		}
+		file_put_contents( $core . '/vendor/' . $file, preg_replace( '/^<\?php?
+/', "<?php
+" . STEALTHAUDIT_PACKAGE_NOTICE . "
+", $code, 1 ) );
+		++$marked;
+	}
+	$log( "modification notice added to {$marked} vendor PHP files" );
+
+	// ---------- notices from the lock (and the shipped license files) must match the committed file ----------
+	if ( (string) file_get_contents( $tree . '/THIRD-PARTY-NOTICES.md' ) !== stealthaudit_third_party_notices( $lock, $core . '/vendor' ) ) {
+		throw new RuntimeException( 'THIRD-PARTY-NOTICES.md is stale: run php tools/notices.php and commit the result.' );
+	}
+
 	// ---------- lint every shipped PHP file with the build PHP ----------
 	$php_files = 0;
 	foreach ( stealthaudit_package_files( $package ) as $file ) {
@@ -433,7 +463,7 @@ try {
 			$zip->setExternalAttributesName( $entry, ZipArchive::OPSYS_UNIX, ( 0100644 ) << 16 );
 			$contents .= hash_file( 'sha256', $temp . '/package/' . $entry ) . '  ' . filesize( $temp . '/package/' . $entry ) . '  ' . $entry . "\n";
 		}
-		$zip->setMtimeName( $entry, STEALTHAUDIT_ZIP_MTIME );
+		$zip->setMtimeName( $entry, $mtime );
 	}
 	if ( ! $zip->close() ) {
 		throw new RuntimeException( 'Cannot write the ZIP.' );
@@ -464,7 +494,7 @@ try {
 				'lock_hash'    => $lock['content-hash'],
 				'tools'        => $tools,
 				'checks'       => $checks,
-				'zip_mtime'    => gmdate( 'c', STEALTHAUDIT_ZIP_MTIME ),
+				'zip_mtime'    => gmdate( 'c', $mtime ),
 			),
 			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 		) . "\n"

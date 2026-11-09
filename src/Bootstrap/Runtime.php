@@ -35,6 +35,9 @@ use StealthAudit\Security\WordPressSession;
 
 /** Idempotent runtime state; capabilities do not grant authentication. */
 final class Runtime {
+	/** Package version; equals the loader header (checked by tests and the package build). */
+	public const VERSION = '0.1.0-dev';
+
 	/**
 	 * Singleton for this PHP request.
 	 *

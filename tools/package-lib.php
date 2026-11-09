@@ -12,6 +12,13 @@
 
 const STEALTHAUDIT_PACKAGE_PREFIX = 'StealthAuditVendor';
 
+// Second line of every shipped vendor PHP file (Apache-2.0 §4(b): modified files say so).
+const STEALTHAUDIT_PACKAGE_NOTICE = '// Modified by the StealthAudit build: namespaces prefixed with StealthAuditVendor\\ (PHP-Scoper 0.18.20); see THIRD-PARTY-NOTICES.md.';
+
+// Composer's runtime is shipped only under the prefix, outside the vendor roots: product code must
+// never name the global Composer\Autoload\* or Composer\InstalledVersions (another plugin's copy).
+const STEALTHAUDIT_PACKAGE_COMPOSER_RUNTIME = '/^\\\\?Composer\\\\(?:Autoload(?:\\\\|$)|InstalledVersions$)/';
+
 /**
  * Whether $name (no leading backslash) belongs to one of the vendor namespaces/functions.
  *
@@ -69,7 +76,9 @@ function stealthaudit_package_prefix_source( string $code, array $roots, bool $s
 			$qualified = $token->is( T_NAME_FULLY_QUALIFIED );
 			$name      = ltrim( $text, '\\' );
 			$prefixed  = 0 === strncmp( $name, $prefix . '\\', strlen( $prefix ) + 1 );
-			if ( $prefixed ) {
+			if ( ! $vendor && preg_match( STEALTHAUDIT_PACKAGE_COMPOSER_RUNTIME, $prefixed ? substr( $name, strlen( $prefix ) + 1 ) : $name ) ) {
+				$problems[] = "line {$token->line}: {$name} names Composer's runtime, which product code must not use";
+			} elseif ( $prefixed ) {
 				if ( ! $vendor && ! stealthaudit_package_is_vendor( substr( $name, strlen( $prefix ) + 1 ), $roots ) ) {
 					$problems[] = "line {$token->line}: {$name} is prefixed but is not a vendor symbol";
 				}
@@ -116,6 +125,9 @@ function stealthaudit_package_prefix_source( string $code, array $roots, bool $s
 						$problems[] = "line {$token->line}: string mentions vendor namespace {$root}";
 					}
 				}
+			}
+			if ( ! $vendor && preg_match( '/(?<![A-Za-z0-9_\\\\])Composer\\\\(?:Autoload|InstalledVersions)/', $plain ) ) {
+				$problems[] = "line {$token->line}: string names Composer's runtime";
 			}
 		}
 		$out .= $text;

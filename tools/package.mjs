@@ -35,7 +35,10 @@ mkdirSync(join(ROOT, 'build'), { recursive: true });
 const archive = 'build/package-source.tar';
 git('archive', '--format=tar', '-o', archive, tree);
 
-const args = ['tools/wp-env.cjs', 'run', 'cli', '--env-cwd=wp-content/mu-plugins/stealthaudit', 'php', 'tools/package.php', `--archive=${archive}`, `--commit=${commit}`, `--dirty=${dirty ? 1 : 0}`];
+// ZIP entry times = the commit time (SOURCE_DATE_EPOCH-style): reproducible per commit, later for
+// every later release (see tools/package.php and the opcache note in docs/operations/installation.md).
+const epoch = git('log', '-1', '--format=%ct', commit);
+const args = ['tools/wp-env.cjs', 'run', 'cli', '--env-cwd=wp-content/mu-plugins/stealthaudit', 'php', 'tools/package.php', `--archive=${archive}`, `--commit=${commit}`, `--dirty=${dirty ? 1 : 0}`, `--source-date-epoch=${epoch}`];
 if (value('package-version')) args.push(`--package-version=${value('package-version')}`);
 if (value('out')) args.push(`--out=${value('out')}`);
 const run = spawnSync(process.execPath, args, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MSYS_NO_PATHCONV: '1' } });

@@ -7,6 +7,12 @@ namespace StealthAudit\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 final class LoaderTest extends TestCase {
+	public function test_runtime_version_matches_the_loader_header_and_package_json(): void {
+		$root = dirname( __DIR__, 2 );
+		self::assertMatchesRegularExpression( '/^ \* Version: ' . preg_quote( \StealthAudit\Bootstrap\Runtime::VERSION, '/' ) . '$/m', (string) file_get_contents( $root . '/loader/stealthaudit.php' ) );
+		self::assertSame( \StealthAudit\Bootstrap\Runtime::VERSION, json_decode( (string) file_get_contents( $root . '/package.json' ), true )['version'] );
+	}
+
 	public function test_direct_include_is_silent(): void {
 		$loader = dirname( __DIR__, 2 ) . '/loader/stealthaudit.php';
 		exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( $loader ) . ' 2>&1', $output, $status );
