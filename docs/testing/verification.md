@@ -115,3 +115,30 @@ npm run test:concurrency   # composer test:concurrency = phpunit --group concurr
 ## Suítes finais no ambiente original (8880), fase 8b
 
 Depois do benchmark (ambiente adicional já destruído), sem carga concorrente, PHP 8.3.36 / MariaDB 10.11.19: `npm run test:unit` 214 testes, 649 asserções, 1 skip; `npm run test:integration` 90 testes, 3.017 asserções (83 anteriores + 7 de injeção de falhas); `npm run test:concurrency` 15 testes, 222 asserções; `npm run quality` sem erros (lint agora inclui `benchmarks/`, WPCS/PHPCompatibilityWP, PHPStan nível 6); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
+
+# Fase 8c: build prefixado, ZIP e instalação pelo artefato
+
+Executado em 2026-11-08. Detalhes, conteúdo do pacote, checksums e resultados passo a passo em [package.md](package.md); aqui ficam os comandos e as mudanças nas suítes.
+
+## Comandos
+
+```text
+npm run package                 # tools/package.mjs → tools/package.php no CLI do 8880; saída em dist/
+npm run verify-package          # tools/verify-package.php (o ZIP mais novo de dist/)
+npm run test:package            # build, verificação, teste negativo, instalação limpa e fluxo pelo artefato
+```
+
+- `test:package` cria **um** ambiente adicional (`tools/wp-env.cjs --matrix=8.3,mariadb:10.11.19,port=8883,tag=artifact,source=none`) e o destrói ao final; guarda de disco de 8 GiB. A nova opção `source=none` não mapeia o repositório no WordPress, remove Composer e o PHPUnit global das duas imagens e monta o repositório só no CLI, em `/opt/stealthaudit-dev`, fora do webroot.
+- `tests/e2e/run.mjs` aceita `STEALTHAUDIT_E2E_WORKDIR` (onde o repositório é visível no CLI) e passa `--path=/var/www/html` ao WP-CLI; o padrão (8880) não muda. A checagem "nenhum item de menu do StealthAudit" ignora o nó do título do site (o site limpo do wp-env se chama "StealthAudit").
+- O CLI do operador passou de `tools/security-operator.php` para `bin/security-operator.php` (vai no pacote); `lint` cobre `bin/`.
+
+## Resultados (fase 8c)
+
+- Pacote `dist/stealthaudit-0.1.0-dev.zip`, SHA-256 `46ec2ffba4a573eea1f31ba7c1425010235bf2098765aafc3ac4fcad546eab1e` (222 arquivos, 457.933 bytes, commit `4c295ba`, árvore limpa); segundo build idêntico. `verify-package` OK; 13/13 cópias adulteradas rejeitadas.
+- Composer na cópia de build: `validate --strict`, `audit --locked --no-dev`, `check-platform-reqs --lock --no-dev` e licenças (allowlist) aprovados. Plugin Check 2.1.0: 27 ocorrências, todas justificadas em [package.md](package.md#plugin-check-apoio).
+- `npm run test:package`: 24 passos aprovados no roteiro de registro, incluindo o e2e completo **pelo artefato** (35/35) e de novo com outro plugin carregando outras versões das mesmas bibliotecas (35/35), atualização A → B com dados/fator/prova/configuração preservados e o CLI empacotado no contêiner web sem Composer. Plugin Check, varredura do log do Apache (0 diagnósticos PHP) e destruição do ambiente rodaram depois de uma reinicialização externa do Docker (detalhes em package.md).
+- Defeito de build encontrado e corrigido: o PHP-Scoper não prefixava `MaxMind\Db\Reader` (símbolo de stub de extensão); a GeoIP falhava no pacote. Ver package.md.
+
+## Suítes finais no ambiente original (8880), fase 8c
+
+Depois do `test:package` (ambiente adicional destruído) e da reinicialização externa do Docker (contêineres do 8880 religados com `docker start`, sem reconfiguração), PHP 8.3.36 / MariaDB 10.11.19: `npm run test:unit` 214 testes, 649 asserções, 1 skip; `npm run test:integration` 90 testes, 3.024 asserções; `npm run test:concurrency` 15 testes, 229 asserções; `npm run quality` sem erros (lint agora inclui `bin/`); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
