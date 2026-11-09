@@ -159,7 +159,9 @@ final class Runtime {
 	/**
 	 * Register the panel route and REST API; every response denies without the full policy.
 	 *
-	 * The route exists even when the panel is unconfigured, as a blocked page/API (503).
+	 * The route exists even when the panel is unconfigured, as a blocked page/API: the empty
+	 * allowlist answers 403; 503 is only for an allowlisted user whose key, installation ID,
+	 * extensions or storage are not ready.
 	 */
 	public function initialize_http(): void {
 		if ( $this->http_initialized ) {
