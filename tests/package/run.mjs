@@ -57,16 +57,22 @@ let last = 0;
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
+// Written after every step, so an interrupted run (e.g. Docker going down) still leaves a record.
+function saveResults() {
+  writeFileSync(join(OUT, 'results.json'), JSON.stringify(results, null, 2) + '\n');
+}
 async function step(title, fn) {
   const started = Date.now();
   const id = ++last;
   try {
     const detail = await fn();
     results.steps.push({ id, title, ok: true, ms: Date.now() - started, detail: detail ?? null });
+    saveResults();
     console.log(`ok ${id} - ${title}${detail ? ` (${typeof detail === 'string' ? detail : JSON.stringify(detail)})` : ''}`);
     return detail;
   } catch (failure) {
     results.steps.push({ id, title, ok: false, ms: Date.now() - started, detail: String(failure.message || failure) });
+    saveResults();
     console.log(`not ok ${id} - ${title}: ${failure.message || failure}`);
     throw failure;
   }
@@ -112,16 +118,19 @@ const web = (script, options = {}) => dexec(WEB, ['sh', '-c', script], { user: U
 const toContainer = (hostPath, name, target) => execFileSync('docker', ['cp', hostPath, `${name}:${target}`], { env });
 
 // Installation exactly as docs/operations/installation.md: unpack outside the webroot, copy the
-// core directory first and the loader LAST by rename (an update swaps whole directories).
+// core directory first and the loader LAST by rename (an update swaps whole directories). The
+// unpack keeps each entry's time like `unzip` and the copies use `cp -a` like `rsync -a`, so the
+// installed files carry the ZIP's times (the commit time): the case where PHP's opcache can keep
+// serving the previous version, which the update step checks.
 function install(zip, { update = false } = {}) {
   const unpack = `/tmp/stealthaudit-unpack-${randomBytes(4).toString('hex')}`;
   toContainer(zip, WEB, '/tmp/stealthaudit.zip');
   dexec(WEB, ['chmod', '0644', '/tmp/stealthaudit.zip']);
-  web(`php -r '$z = new ZipArchive(); if (true !== $z->open($argv[1]) || !$z->extractTo($argv[2])) { exit(1); }' /tmp/stealthaudit.zip ${unpack}`);
+  web(`php -r '$z = new ZipArchive(); if (true !== $z->open($argv[1]) || !$z->extractTo($argv[2])) { exit(1); } for ($i = 0; $i < $z->numFiles; $i++) { $s = $z->statIndex($i); $f = $argv[2] . "/" . $s["name"]; if (is_file($f) && !touch($f, $s["mtime"])) { exit(1); } }' /tmp/stealthaudit.zip ${unpack}`);
   if (update) {
-    web(`set -e; cd ${MU}; rm -rf stealthaudit.new stealthaudit.old; cp -R ${unpack}/mu-plugins/stealthaudit stealthaudit.new; mv stealthaudit stealthaudit.old; mv stealthaudit.new stealthaudit; cp ${unpack}/mu-plugins/stealthaudit.php stealthaudit.php.new; mv -f stealthaudit.php.new stealthaudit.php`);
+    web(`set -e; cd ${MU}; rm -rf stealthaudit.new stealthaudit.old; cp -a ${unpack}/mu-plugins/stealthaudit stealthaudit.new; mv stealthaudit stealthaudit.old; mv stealthaudit.new stealthaudit; cp -a ${unpack}/mu-plugins/stealthaudit.php stealthaudit.php.new; mv -f stealthaudit.php.new stealthaudit.php`);
   } else {
-    web(`set -e; mkdir -p ${MU}; cd ${MU}; test ! -e stealthaudit; cp -R ${unpack}/mu-plugins/stealthaudit stealthaudit; cp ${unpack}/mu-plugins/stealthaudit.php stealthaudit.php.new; mv -f stealthaudit.php.new stealthaudit.php`);
+    web(`set -e; mkdir -p ${MU}; cd ${MU}; test ! -e stealthaudit; cp -a ${unpack}/mu-plugins/stealthaudit stealthaudit; cp -a ${unpack}/mu-plugins/stealthaudit.php stealthaudit.php.new; mv -f stealthaudit.php.new stealthaudit.php`);
   }
   web(`rm -rf ${unpack}`);
   dexec(WEB, ['rm', '-f', '/tmp/stealthaudit.zip']); // docker cp wrote it as root
@@ -448,9 +457,33 @@ try {
 
   await step(`Update A → B (${marker}) by directory swap: data, factor, proofs and config preserved`, async () => {
     const config = dexec(CLI, ['sha256sum', active]).stdout.split(/\s+/)[0];
+    // Which code does Apache EXECUTE? A test-only probe reads Runtime::VERSION through opcache.
+    const token = randomBytes(16).toString('hex');
+    web(`cat > ${MU}/zz-sa-probe.php`, { input: readFileSync(join(ROOT, 'tests/package/probe.php'), 'utf8').replace('__TOKEN__', token) });
+    const probe = async () => (await fetch(`http://127.0.0.1:${PORT}/?sa_package_probe=${token}`, { cache: 'no-store' })).json();
+    const runtimeFile = `${MU}/stealthaudit/src/Bootstrap/Runtime.php`;
+    const mtimeA = web(`stat -c %Y ${runtimeFile}`).stdout;
+    let served = await probe();
+    for (let i = 0; i < 5; i++) served = await probe(); // compile and cache A in the Apache workers reached
+    check(served.runtime_version === version && served.boot === 'ready', `before update the site runs ${JSON.stringify(served)}`);
     install(B.zip, { update: true });
     const files = matchesContents(B.zip.replace(/\.zip$/, '.contents.txt'));
-    web(`rm -rf ${MU}/stealthaudit.old`);
+    const mtimeB = web(`stat -c %Y ${runtimeFile}`).stdout;
+    const beforeReload = [];
+    for (let i = 0; i < 4; i++) beforeReload.push((await probe()).runtime_version);
+    // docs/operations/installation.md: reload PHP (here Apache + mod_php) after the swap.
+    dexec(WEB, ['apache2ctl', '-k', 'graceful']);
+    let afterReload = null;
+    for (let i = 0; i < 40 && afterReload?.runtime_version !== marker; i++) {
+      await sleep(500);
+      afterReload = await probe().catch(() => null);
+    }
+    check(afterReload?.runtime_version === marker, `after the reload Apache still runs ${JSON.stringify(afterReload)}`);
+    const workers = [];
+    for (let i = 0; i < 6; i++) workers.push((await probe()).runtime_version);
+    check(workers.every((v) => v === marker), `some worker still runs A: ${workers.join(',')}`);
+    web(`rm -f ${MU}/zz-sa-probe.php; rm -rf ${MU}/stealthaudit.old`);
+    results.opcache = { served_before: served, mtime_a: Number(mtimeA), mtime_b: Number(mtimeB), before_reload: beforeReload, after_reload: afterReload.runtime_version };
     const after = flow('snapshot', { user: operator.id, upto_event: before.events_max });
     check(after.version === marker && after.boot === 'ready', `after update ${after.version}/${after.boot}`);
     check(after.schema === before.schema && after.old_events === before.events && after.errors >= before.errors && after.errors_max >= before.errors_max, `rows lost: ${JSON.stringify({ before, after })}`);
@@ -472,7 +505,7 @@ try {
     wp('cron', 'event', 'run', 'stealthaudit_maintenance');
     const maint = flow('snapshot').maintenance;
     check(maint.last_run !== before.maintenance.last_run, 'maintenance did not run on B');
-    return { installedFiles: files, version: after.version, eventsKept: after.old_events, factorUnchanged: true, proofStillValid: still.status, newEvent: true, maintenanceOnB: maint.state };
+    return { installedFiles: files, version: after.version, executed: { mtimeAEqualsB: mtimeA === mtimeB, opcache: served.opcache_enabled, validateTimestamps: served.validate_timestamps, revalidateFreq: served.revalidate_freq, beforeReload: [...new Set(beforeReload)], afterGracefulReload: afterReload.runtime_version }, eventsKept: after.old_events, factorUnchanged: true, proofStillValid: still.status, newEvent: true, maintenanceOnB: maint.state };
   });
 
   await step('Packaged operator CLI (web container: PHP only, no Composer) refuses while the allowlist is active', async () => {
