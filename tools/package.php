@@ -24,7 +24,7 @@ const STEALTHAUDIT_SCOPER_SHA256  = '5e35e4a89ea53b2c70a19bfa8a856e4f9080aa12eb1
 const STEALTHAUDIT_SCOPER_URL     = 'https://github.com/humbug/php-scoper/releases/download/0.18.20/php-scoper.phar';
 // Licenses compatible with distributing the bundle under GPL-3.0-or-later.
 const STEALTHAUDIT_LICENSES = array( 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'ISC' );
-// ZIP entry times are the commit time (--source-date-epoch from tools/package.mjs, like
+// ZIP entry times are the last commit time of the packaged inputs (--source-date-epoch from tools/package.mjs, like
 // SOURCE_DATE_EPOCH): the same commit always gives the same bytes, and a later release always has
 // later file times, so an mtime-preserving copy (unzip, rsync -a) cannot leave PHP's opcache
 // convinced that an updated file is the cached old one. installation.md still requires a PHP

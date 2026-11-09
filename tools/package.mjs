@@ -35,9 +35,12 @@ mkdirSync(join(ROOT, 'build'), { recursive: true });
 const archive = 'build/package-source.tar';
 git('archive', '--format=tar', '-o', archive, tree);
 
-// ZIP entry times = the commit time (SOURCE_DATE_EPOCH-style): reproducible per commit, later for
-// every later release (see tools/package.php and the opcache note in docs/operations/installation.md).
-const epoch = git('log', '-1', '--format=%ct', commit);
+// ZIP entry times (SOURCE_DATE_EPOCH-style) = time of the last commit that touched anything the
+// package is made from: shipped sources, Composer manifests or the build tooling. Reproducible per
+// commit; later whenever packaged bytes can change (see the opcache note in
+// docs/operations/installation.md); unchanged by docs-only commits, so their SHA-256 stays the same.
+const PACKAGED = ['loader', 'bootstrap.php', 'src', 'assets', 'templates', 'bin', 'config', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'composer.json', 'composer.lock', 'tools/package.php', 'tools/package-lib.php', 'tools/scoper.inc.php', 'tools/notices.php', 'tools/package.mjs'];
+const epoch = git('log', '-1', '--format=%ct', commit, '--', ...PACKAGED);
 const args = ['tools/wp-env.cjs', 'run', 'cli', '--env-cwd=wp-content/mu-plugins/stealthaudit', 'php', 'tools/package.php', `--archive=${archive}`, `--commit=${commit}`, `--dirty=${dirty ? 1 : 0}`, `--source-date-epoch=${epoch}`];
 if (value('package-version')) args.push(`--package-version=${value('package-version')}`);
 if (value('out')) args.push(`--out=${value('out')}`);
