@@ -18,12 +18,25 @@ Critério de aprovação: código de saída zero **e** saída sem diagnósticos 
 
 Os testes usam `vendor/` do workspace (instalado pelo lock, `platform.php` 8.3.0), montado em todos os ambientes; a matriz não executa `composer install`.
 
+### Execução interrompida
+
+Ctrl+C, terminal fechado ou máquina reiniciada pulam o `finally` da matriz: contêineres, volumes e a config `.wp-env.matrix-<slug>.json` ficam para trás. Para limpar, repita as **mesmas** opções `--matrix` da execução (elas formam o nome do ambiente) com `destroy`, e só então apague a config gerada:
+
+```text
+node tools/wp-env.cjs --matrix=8.4,mysql:8.4.13 destroy --force
+node tools/wp-env.cjs --matrix=8.4,mysql:8.4.13,prefix=wpx9_,collate=utf8mb4_0900_ai_ci destroy --force
+node tools/wp-env.cjs --matrix=8.3,mariadb:10.11.19,port=8882,tag=bench destroy --force              # benchmark
+node tools/wp-env.cjs --matrix=8.3,mariadb:10.11.19,port=8883,tag=artifact,source=none destroy --force # test:package
+```
+
+No PowerShell, `Remove-Item .wp-env.matrix-<slug>.json`; no Git Bash, `rm .wp-env.matrix-<slug>.json`. Confira com `docker ps -a --filter name=wp-env-stealthaudit-matrix` que nada sobrou. Esses comandos não tocam o ambiente 8880 (`wp-env-stealthaudit-tests-*`), que usa outro `WP_ENV_HOME`. A seção [Limpeza](#limpeza) diz o que o `destroy` apaga.
+
 ## Versões observadas
 
 | Item | Valor |
 | --- | --- |
-| PHP 8.3 (ambiente de testes original) | 8.3.36, imagem `wordpress:php8.3` do wp-env (ambiente existente, não recriado) |
-| PHP 8.3 (matriz) | 8.3.x de `wordpress:7.1.4-php8.3-apache` / `wordpress:cli-2.12.0-php8.3` (ver tabela de resultados) |
+| PHP 8.3 (ambiente de testes original) | 8.3.36. O ambiente 8880 (existente, não recriado) usa as tags **flutuantes** geradas pelo wp-env 12.1.0: `wordpress:php8.3` / `wordpress:cli-php8.3` e `mariadb:10.11`, que nesta execução resolveram para PHP 8.3.36 e MariaDB 10.11.19 (a imagem `mariadb:10.11` local tem o mesmo ID `d769e3796082` que `mariadb:10.11.19`). Recriar esse ambiente pode trazer outras versões. |
+| PHP 8.3 (matriz) | 8.3.36 (CLI e Apache); `wordpress:7.1.4-php8.3-apache` sha256:9001ea7dafd2…, `wordpress:cli-2.12.0-php8.3` sha256:a4fff017eb08… |
 | PHP 8.4 | 8.4.27 (CLI e Apache); `wordpress:7.1.4-php8.4-apache` sha256:042ae671b7a5…, `wordpress:cli-2.12.0-php8.4` sha256:37b7e3ed9b53… |
 | PHP 8.5 | 8.5.12 (CLI e Apache); `wordpress:7.1.4-php8.5-apache` sha256:63f89c89eeba…, `wordpress:cli-2.12.0-php8.5` sha256:d16fa67b450f… |
 | MariaDB | `mariadbd Ver 10.11.19-MariaDB-ubu2204`; `mariadb:10.11.19` sha256:d769e3796082…; banco utf8mb4/utf8mb4_general_ci; conexão WordPress utf8mb4_unicode_520_ci |
@@ -32,7 +45,7 @@ Os testes usam `vendor/` do workspace (instalado pelo lock, `platform.php` 8.3.0
 | PHPUnit / polyfills | 9.6.38 / yoast 4.0.0 (do lock); compatíveis com 8.3, 8.4 e 8.5 nesta execução |
 | Extensões (8.4, igual em 8.3/8.5) | bcmath ctype curl date dom exif fileinfo filter gd hash iconv imagick intl json libxml mbstring mysqli mysqlnd openssl pcre PDO pdo_sqlite Phar posix random readline Reflection session SimpleXML sodium SPL sqlite3 standard tokenizer xml xmlreader xmlwriter OPcache zip zlib |
 
-Os digests completos de cada execução ficam em `artifacts/matrix/<slug>/results.json`.
+Os digests completos de cada execução ficam em `artifacts/matrix/<slug>/results.json` (por exemplo `wordpress:7.1.4-php8.3-apache` = `sha256:9001ea7dafd2bc3f05d068e6413b0edd2a116eeed4dfe9e08b6bd718dee4960a` e `wordpress:cli-2.12.0-php8.3` = `sha256:a4fff017eb08c03187e90fe52d4bff8d3a4d4a5103de05829a6e747c4ca3056e` em `php83-mysql8413`).
 
 ## Resultados
 
@@ -83,7 +96,9 @@ Depois de todas as correções, no ambiente de testes original (PHP 8.3.36, Mari
 
 ## Limpeza
 
-Cada combinação terminou com `wp-env destroy --force` (contêineres, volumes, rede e imagens construídas). Ao final não restou contêiner, volume ou config `.wp-env.matrix-*.json`; as imagens base com tag exata baixadas (wordpress 7.1.4-php8.x, cli-2.12.0-php8.x, mysql:8.4.13, mariadb:10.11.19) continuam no cache local do Docker.
+Cada combinação terminou com `wp-env destroy --force`. No wp-env 12.1.0 isso roda `docker compose down --rmi all`, que apaga contêineres, volumes, rede, as imagens construídas **e também a imagem baixada do banco de cada combinação** (`mysql:8.4.13`, `mariadb:10.11.19`) quando nenhum outro contêiner a usa. Atenção: se outro projeto local usa a mesma tag exata e não está com um contêiner criado no momento, o teardown da matriz também remove essa imagem dele (ela é baixada de novo no próximo uso). A imagem `mariadb:10.11` do 8880 continuou presente porque o contêiner dele a usa.
+
+As bases com tag exata (`wordpress:7.1.4-php8.x-apache`, `wordpress:cli-2.12.0-php8.x`) **não** ficam no cache local: o BuildKit as guarda só no cache de build, e o `docker builder prune -f` rodado entre as combinações (ver Infraestrutura) as removeu. Ao final não restou contêiner, volume, imagem ou config `.wp-env.matrix-*.json` da matriz; ficaram só as imagens do ambiente 8880. (Uma versão anterior desta seção dizia que as bases continuavam no cache; a revisão da fase 8a mostrou que não.)
 
 # Fase 8b: desempenho, concorrência e injeção de falhas
 

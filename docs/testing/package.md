@@ -2,19 +2,21 @@
 
 Executado em 2026-11-08 e, após a revisão (rodada de correção 1), em 2026-11-09, no Windows 11 (Docker Desktop/WSL2, Node 22.17.0, Chrome local via `playwright-core` 1.64.1). Cobre os itens 5–8 da fase 8: build limpo a partir dos lockfiles com dependências prefixadas, ZIP com checksum e lista de conteúdo, verificações Composer/licenças/Plugin Check e instalação do ZIP num WordPress limpo, com o fluxo do operador executado **pelo artefato**. Nenhum release, tag ou deploy foi feito.
 
+Os números e o SHA-256 abaixo são do registro da fase 8c, com a versão `0.1.0-dev`. O pacote da versão **0.1.0**, reconstruído na fase 8d pelo mesmo processo, tem SHA-256, resultados e limitações em [docs/releases/0.1.0.md](../releases/0.1.0.md).
+
 ## Comandos
 
 ```text
 npm run env:test:start                 # ambiente de testes 8880: o CLI dele é o host de build (PHP 8.3 + Composer)
 npm run package                        # dist/stealthaudit-<versão>.zip + .zip.sha256 + .contents.txt + .build.json
 npm run verify-package                 # o ZIP mais novo de dist/
-npm run verify-package -- dist/stealthaudit-0.1.0-dev.zip --against-source
+npm run verify-package -- dist/stealthaudit-0.1.0.zip --against-source
 npm run test:package                   # build + verificação + instalação limpa + fluxo completo (≈ 30 min)
 ```
 
 Funcionam iguais em PowerShell e Git Bash (Node chama `git` e `docker`; nenhum comando de shell Unix no host). `npm run package` exige árvore rastreada sem alterações; `-- --allow-dirty` inclui alterações rastreadas ainda não commitadas e marca o build como `"dirty": true` (não é artefato de release). `-- --package-version X --out DIR` só serve para builds de teste (marcador de atualização). `dist/` e `build/` estão no `.gitignore`.
 
-Conferência do checksum pelo operador: `sha256sum stealthaudit-0.1.0-dev.zip` (Linux) ou `Get-FileHash -Algorithm SHA256 .\stealthaudit-0.1.0-dev.zip` (PowerShell). O `.zip.sha256` e o `verify-package` provam **integridade e coerência interna**, não autenticidade: quem consegue trocar o ZIP troca também o `.sha256` (o teste negativo faz exatamente isso para isolar cada regra). O operador deve comparar com um SHA-256 obtido por outro canal (notas do release, tag assinada); isso fica para a publicação (fase 8d).
+Conferência do checksum pelo operador: `sha256sum stealthaudit-0.1.0.zip` (Linux) ou `Get-FileHash -Algorithm SHA256 .\stealthaudit-0.1.0.zip` (PowerShell). O `.zip.sha256` e o `verify-package` provam **integridade e coerência interna**, não autenticidade: quem consegue trocar o ZIP troca também o `.sha256` (o teste negativo faz exatamente isso para isolar cada regra). O operador deve comparar com um SHA-256 obtido por outro canal (notas do release, tag assinada). O valor da 0.1.0 está nas [notas do release](../releases/0.1.0.md), que também precisam chegar por um canal diferente do download.
 
 ## Versões
 
@@ -51,7 +53,7 @@ O PHP-Scoper não entra no `composer.json` nem no `vendor/` do workspace: o PHAR
 
 ## Conteúdo do pacote
 
-`dist/stealthaudit-0.1.0-dev.zip` — **SHA-256 `dc6dc89824b509fc62dbf66f060848cfbf1fd7f0d0793faa412cdd4656e862c0`**, 471.618 bytes, 222 arquivos (204 PHP), construído do commit `de6fb79` sem alterações locais (`"dirty": false`), entradas datadas de 2026-11-09T10:42:43Z (último commit das entradas do pacote). Um segundo build do mesmo commit deu o mesmo SHA-256 (passo 3 do `test:package`). A lista completa com SHA-256 por arquivo está em `dist/stealthaudit-0.1.0-dev.contents.txt`; o manifesto (`.build.json`) registra commit, data, versões das ferramentas e o resultado de cada verificação Composer. (O ZIP registrado na primeira rodada desta fase, `46ec2ffb…eab1e`, tinha datas de 1980 e vendor sem aviso de modificação; foi substituído. Commits só de testes ou documentação não mudam este SHA-256: a data das entradas vem do último commit das entradas do pacote — `dfba1e6`, só de teste, gerou o mesmo SHA que o commit anterior.)
+`dist/stealthaudit-0.1.0-dev.zip` — **SHA-256 `dc6dc89824b509fc62dbf66f060848cfbf1fd7f0d0793faa412cdd4656e862c0`**, 471.618 bytes, 222 arquivos (204 PHP), construído do commit `de6fb79` sem alterações locais (`"dirty": false`), entradas datadas pelo último commit das entradas do pacote (`--source-date-epoch` = 2026-11-09T10:42:43Z). A data DOS do ZIP tem passos de 2 segundos e não guarda fuso: as entradas trazem 2026-11-09 10:42:42, sem fuso (o libzip usa o segundo par anterior e não grava o campo extra UT), e o mtime instalado muda conforme o fuso do servidor que descompacta. Para o opcache isso não importa, porque A e B mudam igual. Um segundo build do mesmo commit deu o mesmo SHA-256 (passo 3 do `test:package`). A lista completa com SHA-256 por arquivo está em `dist/stealthaudit-0.1.0-dev.contents.txt`; o manifesto (`.build.json`) registra commit, data, versões das ferramentas e o resultado de cada verificação Composer. (O ZIP registrado na primeira rodada desta fase, `46ec2ffb…eab1e`, tinha datas de 1980 e vendor sem aviso de modificação; foi substituído. Commits só de testes ou documentação não mudam este SHA-256: a data das entradas vem do último commit das entradas do pacote — `dfba1e6`, só de teste, gerou o mesmo SHA que o commit anterior.)
 
 | Caminho no ZIP | Arquivos | Bytes |
 | --- | --- | --- |
@@ -93,6 +95,7 @@ Varredura por expressão regular sobre o ZIP de release extraído (todos os PHP 
 | --- | --- | --- |
 | Produto: nenhum | `eval`, `assert`, execução de processo, crase, `unserialize`, `extract`, `create_function`, `/e`, `$$`, `mail`, `ini_set`, `move_uploaded_file`, `dl` | ausentes |
 | `stealthaudit.php` (loader) | `require_once $stealthaudit_root . '/bootstrap.php'` | caminho fixo relativo a `__DIR__` |
+| `src/Storage/Schema.php` | `require_once ABSPATH . 'wp-admin/includes/upgrade.php'` | caminho fixo do core do WordPress, para usar o `dbDelta()` |
 | `src/Config/ConfigurationLoader.php` | `require $file` | arquivo de configuração do operador; `ConfigurationLoader` recusa arquivo dentro do webroot antes do `require` |
 | `src/Http/Panel.php` | `require $stealthaudit_template`; `parse_str()` | template fixo do pacote; `parse_str` só da query da **própria** URL do painel gerada a partir da configuração, nunca de entrada do usuário |
 | `src/Config/Configuration.php`, `src/Security/SecretCipher.php` | `base64_decode(…, true)` | modo estrito, sobre chave configurada / envelope cifrado de tamanho limitado; falha fecha |
