@@ -31,6 +31,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { base32, decodeQr, parseOtpauth, totp } from '../e2e/otp.mjs';
@@ -460,7 +461,16 @@ try {
     // Which code does Apache EXECUTE? A test-only probe reads Runtime::VERSION through opcache.
     const token = randomBytes(16).toString('hex');
     web(`cat > ${MU}/zz-sa-probe.php`, { input: readFileSync(join(ROOT, 'tests/package/probe.php'), 'utf8').replace('__TOKEN__', token) });
-    const probe = async () => (await fetch(`http://127.0.0.1:${PORT}/?sa_package_probe=${token}`, { cache: 'no-store' })).json();
+    // A new connection per request: Apache's KeepAliveTimeout closes an idle pooled socket during
+    // the install, and a reused dead socket would look like a server failure.
+    const probe = () => new Promise((done, fail) => {
+      http.get({ host: '127.0.0.1', port: PORT, path: `/?sa_package_probe=${token}`, agent: false, headers: { Connection: 'close' } }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => { try { done(JSON.parse(body)); } catch { fail(new Error(`probe answered ${res.statusCode}: ${body.slice(0, 120)}`)); } });
+      }).on('error', fail);
+    });
     const runtimeFile = `${MU}/stealthaudit/src/Bootstrap/Runtime.php`;
     const mtimeA = web(`stat -c %Y ${runtimeFile}`).stdout;
     let served = await probe();
