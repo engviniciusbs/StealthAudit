@@ -166,3 +166,19 @@ Primeira rodada (2026-11-08): ZIP `46ec2ffb…eab1e` (datas fixas de 1980, sem a
 Depois do `test:package` (ambiente adicional destruído) e da reinicialização externa do Docker (contêineres do 8880 religados com `docker start`, sem reconfiguração), PHP 8.3.36 / MariaDB 10.11.19: `npm run test:unit` 214 testes, 649 asserções, 1 skip; `npm run test:integration` 90 testes, 3.024 asserções; `npm run test:concurrency` 15 testes, 229 asserções; `npm run quality` sem erros (lint agora inclui `bin/`); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
 
 Rodada de correção 1 (2026-11-09), depois do `test:package` de registro: `npm run test:unit` 215 testes, 651 asserções, 1 skip (novo teste de `Runtime::VERSION`); `npm run test:integration` 90 testes, 3.024 asserções; `npm run test:concurrency` 15 testes, 229 asserções; `npm run quality` sem erros (phpcs e PHPStan agora incluem `bin/`); `npm run test:e2e` 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
+
+# Fase 8d: versão 0.1.0 revisável
+
+Executado em 2026-11-09. Notas da versão, SHA-256 do pacote, limitações conhecidas e pendências em [docs/releases/0.1.0.md](../releases/0.1.0.md).
+
+- Versão 0.1.0 em `Runtime::VERSION`, no cabeçalho do loader, no `package.json` e no `package-lock.json`. `LoaderTest` passou a conferir também os dois campos do `package-lock.json`, e o build recusa versões divergentes.
+- Itens da re-revisão 8c: N1, os literais sem bytes CR/LF crus; N2, o passo de atualização do `test:package` passa a afirmar opcache ligado e mtime igual; N3, a versão do PHP-Scoper vem de uma constante só; N4, dois casos adulterados nas notices (18 no total); N5 e N6 nos documentos.
+- `npm run package` no commit `36f6391`: `dist/stealthaudit-0.1.0.zip`, SHA-256 `fc358e7bc7d7bf3d6d666d8cd553fca02f06b4c2ee07c25da26a0a14ffc7fea3`, 222 arquivos, 471.614 bytes, `dirty: false`. `verify-package --against-source` OK.
+- `npm run test:package` (uma execução, ambiente adicional 8883 destruído ao final): **25/25** passos.
+  - Rebuild idêntico; 18/18 cópias adulteradas rejeitadas.
+  - E2E pelo artefato 35/35, e de novo com outro plugin carregado antes 35/35.
+  - Atualização A → B: opcache ligado e o mesmo mtime afirmados; A executou até o reload e B depois.
+  - O CLI empacotado passou na recusa, na rotação e no reset.
+  - Plugin Check: 4 ocorrências justificadas. Log do Apache: 1.204 linhas, 0 diagnósticos PHP.
+- Suítes no 8880 depois do `test:package`: unidade 215 / 653 / 1 skip; integração 90 / 3.024; concorrência 15 / 229; `quality` sem erros; e2e 35 aprovados, 0 falhas, site restaurado. Saídas sem avisos PHP.
+- A matriz e o benchmark não foram repetidos; o produto só mudou em `Runtime::VERSION` e no cabeçalho do loader desde a 8c.
