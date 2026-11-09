@@ -353,6 +353,7 @@ final class HttpTest extends PHPUnit\Framework\TestCase {
 	 */
 	public function test_case_variant_routes_get_the_namespace_hardening(): void {
 		$variants = array(
+			array( 'GET', '/stealthaudit/v1/events' ),
 			array( 'GET', '/StealthAudit/v1/events' ),
 			array( 'GET', '/STEALTHAUDIT/V1/STATUS' ),
 			array( 'GET', '/stealthaudit/V1/Errors' ),
