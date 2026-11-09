@@ -28,17 +28,18 @@ Sem WP-CLI, o agendador pode chamar `https://site/wp-cron.php` com o mesmo efeit
 
 | Situação | Ação |
 | --- | --- |
-| Painel 503 "indisponível" | Confira configuração (arquivo legível e fora do webroot, chave de 32 bytes, `installation_id`, allowlist), extensões `sodium`/`iconv`/`xmlwriter` e HTTPS. O código `STEALTHAUDIT_BOOT_STATUS` (`ready`, `vendor_missing`, `bootstrap_missing`, `bootstrap_error`, `php_unsupported`) pode ser lido por `wp eval 'echo STEALTHAUDIT_BOOT_STATUS;'`. |
+| Painel 403 "Acesso negado" para um operador que deveria entrar | O ID não está em `authorized_user_ids`, **ou a configuração inteira foi rejeitada** (qualquer valor inválido, inclusive `mmdb_max_age_days` fora de 1–3650): então a allowlist volta a vazia. Confira com `wp eval 'var_dump( \StealthAudit\Bootstrap\Runtime::boot()->configuration_valid );'` ([installation.md](installation.md#configuração-segura)). |
+| Painel 503 "indisponível" (ID autorizado) | Confira configuração (arquivo legível e fora do webroot, chave de 32 bytes, `installation_id`), extensões `sodium`/`iconv`/`xmlwriter` e o armazenamento. O código `STEALTHAUDIT_BOOT_STATUS` (`ready`, `vendor_missing`, `bootstrap_missing`, `bootstrap_error`, `php_unsupported`) pode ser lido por `wp eval 'echo STEALTHAUDIT_BOOT_STATUS;'`. |
 | Fator perdido, recuperação abandonada (`recovery_locked`) | Reset offline em [panel-security.md](panel-security.md#reset-de-fator-perdido). |
 | Chave perdida | [panel-security.md](panel-security.md#rotação-de-chave-e-migração), último parágrafo. |
 | "Atrasada" persistente | Site sem tráfego ou WP-Cron desligado: veja a seção acima. |
-| Captura "suspensa por capacidade" | Os limites `event_rows`/`event_bytes` (ou de erros) foram atingidos. Aguarde a manutenção, ou aumente `limits` conscientemente. |
+| Captura "suspensa por capacidade" | Os limites `event_rows`/`event_bytes` (ou de erros) foram atingidos. Aguarde a manutenção, ou aumente `limits` conscientemente: acima de 100 000 eventos, buscas com filtros esparsos ficam lentas ([installation.md](installation.md#capacidade-e-limites)). |
 | Atualização com problema | Rollback de arquivos (e do banco, se o esquema migrou) em [installation.md](installation.md#atualização-de-arquivos-e-migração). |
 | Restauração de backup | Restaure banco e configuração do **mesmo** momento; um banco restaurado com outra chave não abre os fatores. Provas de sessão antigas restauradas expiram sozinhas (inatividade de 30 min). |
 
 ## Pausar o painel sem parar a coleta
 
-Esvazie `authorized_user_ids` na configuração ativa. A coleta continua, ninguém consulta. É o passo inicial de reset e rotação ([panel-security.md](panel-security.md)).
+Esvazie `authorized_user_ids` na configuração ativa. A coleta continua, ninguém consulta (o painel responde 403 a todos). É o passo inicial de reset e rotação ([panel-security.md](panel-security.md)).
 
 ## Desativação emergencial pelo loader
 
@@ -58,15 +59,15 @@ Não existe endpoint, botão nem comando HTTP para "apagar tudo". A remoção é
 
 1. Exporte o que precisar guardar e confirme a política de retenção (inclusive dos backups, que não são afetados).
 2. Desative pelo loader (seção acima) **antes** de apagar: com o loader ativo a próxima requisição recriaria as tabelas.
-3. Descubra o prefixo (`wp db prefix`) e apague, trocando `wp_` pelo prefixo real:
+3. Descubra o prefixo (`wp db prefix`) e apague as tabelas, trocando `wp_` pelo prefixo real; as options e o evento de cron saem pelas APIs do WordPress, que também limpam o cache de objetos:
 
    ```text
    wp db query "DROP TABLE IF EXISTS wp_stealthaudit_events, wp_stealthaudit_errors, wp_stealthaudit_state"
-   wp db query "DELETE FROM wp_options WHERE option_name IN ('stealthaudit_schema_version','stealthaudit_schema_lease')"
+   wp option delete stealthaudit_schema_version stealthaudit_schema_lease
    wp cron event delete stealthaudit_maintenance
    ```
 
-   Sem WP-CLI, os mesmos comandos SQL pelo phpMyAdmin do host.
+   A lease só existe durante uma instalação ou migração; sem ela, o `wp option delete` imprime `Warning: Could not delete 'stealthaudit_schema_lease' option. Does it exist?` e termina com código 0, o que é esperado. Sem WP-CLI, rode pelo phpMyAdmin do host o `DROP TABLE` acima e `DELETE FROM wp_options WHERE option_name IN ('stealthaudit_schema_version','stealthaudit_schema_lease')`. Nesse caso, com cache de objetos persistente (Redis, Memcached), esvazie o cache depois: o SQL direto não o atualiza.
 4. Apague `wp-content/mu-plugins/stealthaudit/` e o `stealthaudit.php.off`.
 5. Remova a configuração (`STEALTHAUDIT_CONFIG`/`STEALTHAUDIT_CONFIG_FILE` do `wp-config.php` e o arquivo externo) e descarte a chave conforme a política do cofre. Se usava GeoIP, apague a base e a configuração/chave de download do seu processo de atualização.
 6. As regras de rewrite do endpoint saem na próxima regeneração (Configurações → Links permanentes → Salvar).
