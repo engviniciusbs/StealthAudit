@@ -28,8 +28,8 @@ Sem WP-CLI, o agendador pode chamar `https://site/wp-cron.php` com o mesmo efeit
 
 | Situação | Ação |
 | --- | --- |
-| Painel 403 "Acesso negado" para um operador que deveria entrar | O ID não está em `authorized_user_ids`, **ou a configuração inteira foi rejeitada** (qualquer valor inválido, inclusive `mmdb_max_age_days` fora de 1–3650): então a allowlist volta a vazia. Confira com `wp eval 'var_dump( \StealthAudit\Bootstrap\Runtime::boot()->configuration_valid );'` ([installation.md](installation.md#configuração-segura)). |
-| Painel 503 "indisponível" (ID autorizado) | Confira configuração (arquivo legível e fora do webroot, chave de 32 bytes, `installation_id`), extensões `sodium`/`iconv`/`xmlwriter` e o armazenamento. O código `STEALTHAUDIT_BOOT_STATUS` (`ready`, `vendor_missing`, `bootstrap_missing`, `bootstrap_error`, `php_unsupported`) pode ser lido por `wp eval 'echo STEALTHAUDIT_BOOT_STATUS;'`. |
+| Painel 403 "Acesso negado" para um operador que deveria entrar | O ID não está em `authorized_user_ids`, **ou a configuração inteira foi rejeitada**: arquivo ilegível ou dentro do webroot, chave que não tem 32 bytes, `mmdb_max_age_days` fora de 1–3650 ou qualquer outro valor inválido. Então a allowlist volta a vazia. Confira com `wp eval 'var_dump( \StealthAudit\Bootstrap\Runtime::boot()->configuration_valid );'` ([installation.md](installation.md#configuração-segura)). |
+| Painel 503 "indisponível" (ID autorizado) | A configuração é válida, mas falta algo: `key_base64` vazio, `installation_id` vazio, extensões `sodium`/`iconv`/`xmlwriter` ou o armazenamento (banco, esquema) não está pronto. O código `STEALTHAUDIT_BOOT_STATUS` (`ready`, `vendor_missing`, `bootstrap_missing`, `bootstrap_error`, `php_unsupported`) pode ser lido por `wp eval 'echo STEALTHAUDIT_BOOT_STATUS;'`. |
 | Fator perdido, recuperação abandonada (`recovery_locked`) | Reset offline em [panel-security.md](panel-security.md#reset-de-fator-perdido). |
 | Chave perdida | [panel-security.md](panel-security.md#rotação-de-chave-e-migração), último parágrafo. |
 | "Atrasada" persistente | Site sem tráfego ou WP-Cron desligado: veja a seção acima. |

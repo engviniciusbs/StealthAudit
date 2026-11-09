@@ -2,7 +2,7 @@
 
 Runbooks do operador: [instalação, configuração e atualização](installation.md) · [manutenção, backups, recuperação, desativação e remoção de dados](maintenance-and-data.md) · [GeoIP](geoip.md) · chave e fatores (este documento).
 
-O operador controla PHP, configuração externa e backup do banco. Estes procedimentos são locais e nunca oferecem bypass HTTP. A ferramenta offline vem no pacote em `wp-content/mu-plugins/stealthaudit/bin/security-operator.php` (no repositório, `bin/security-operator.php`) e roda com o PHP 8.3+ do próprio host WordPress e o autoloader prefixado do pacote: Composer não é necessário no servidor. Só funciona em linha de comando (por HTTP sai antes de qualquer ação, sem saída) e recusa agir se o StealthAudit carregado pelo WordPress não for a cópia do mesmo diretório — uma cópia antiga ou avulsa do script não opera sobre uma instalação mais nova. Execute-o como o usuário do PHP do site (o mesmo que lê o arquivo de configuração).
+O operador controla PHP, configuração externa e backup do banco. Estes procedimentos são locais e nunca oferecem bypass HTTP. A ferramenta offline vem no pacote em `wp-content/mu-plugins/stealthaudit/bin/security-operator.php` (no repositório, `bin/security-operator.php`) e roda com o PHP 8.3+ do próprio host WordPress e o autoloader prefixado do pacote: Composer não é necessário no servidor. Só funciona em linha de comando (por HTTP sai antes de qualquer ação, sem saída) e recusa agir se o StealthAudit carregado pelo WordPress não for a cópia do mesmo diretório — uma cópia antiga ou avulsa do script não opera sobre uma instalação mais nova. Execute-o como o usuário do PHP do site (o mesmo que lê o arquivo de configuração). **O CLI precisa carregar a mesma configuração que o servidor web**: mesma constante `STEALTHAUDIT_CONFIG`/`STEALTHAUDIT_CONFIG_FILE` no `wp-config.php` ou a mesma variável de ambiente. Se o servidor web recebe o caminho por `SetEnv` ou pelo ambiente do pool PHP-FPM e o seu shell aponta para outro arquivo, o script confere a allowlist **desse** arquivo, e não a do painel ativo: pode concluir que o painel está pausado quando não está. Na maioria desses casos falta a chave e o script recusa, mas não conte com isso.
 
 ## Configuração e backup
 
@@ -22,7 +22,16 @@ STEALTHAUDIT_WORDPRESS_ROOT=/caminho/wordpress php /caminho/wordpress/wp-content
 
 A sintaxe acima é de shell Unix no host PHP; em PowerShell configure `$env:STEALTHAUDIT_WORDPRESS_ROOT` antes de executar `php …\wp-content\mu-plugins\stealthaudit\bin\security-operator.php reset 123`. O caminho não é segredo. O reset substitui fator e recovery por CAS, gera generation aleatória e revoga todas as sessões WordPress desse usuário. Nenhum código/chave é impresso. Repetir o reset do mesmo ID é seguro: gera outra generation e revoga sessões de novo; ID sem fator falha sem alterar nada. Reative o ID autorizado somente depois do reset bem-sucedido. O usuário precisa novo login WordPress, senha reconfirmada e novo cadastro/confirm TOTP antes dos dados.
 
-Recovery pelo painel com senha mais código invalida o conjunto inteiro e permite apenas confirmar um novo fator. Abandonar esse recadastro por mais de dez minutos mantém `recovery_locked`; não restaura o fator antigo nem libera novo cadastro com senha apenas. O operador então usa este reset offline. Também se aplica à troca de fator abandonada.
+Recovery pelo painel com senha mais código invalida o conjunto inteiro e permite apenas confirmar um novo fator. Abandonar esse recadastro por mais de dez minutos mantém `recovery_locked`; não restaura o fator antigo nem libera novo cadastro com senha apenas. O operador então usa este reset offline. Também se aplica à troca de fator abandonada. O novo QR só é mostrado de novo para a **mesma sessão WordPress** que começou a troca ou a recuperação: se essa sessão terminar antes da confirmação (logout, cookie expirado, outro plugin encerrando sessões, troca de navegador ou aparelho para escanear), a conta fica em `recovery_locked` mesmo dentro dos dez minutos, e sem códigos de recuperação.
+
+## Encerrar o acesso ao painel imediatamente
+
+Não há comando offline que revogue todas as provas de uma vez. Para cortar o acesso na hora, sem shell e sem passar pelo limitador de tentativas:
+
+- **Remova o ID de `authorized_user_ids`** na configuração ativa: a próxima requisição desse usuário recebe 403. Esvaziar a lista pausa o painel para todos.
+- **Encerre as sessões WordPress do usuário** (pelo botão de sessões da tela de edição do usuário no wp-admin, ou `wp user session destroy <ID> --all`): a prova do painel é ligada à sessão, conferida a cada requisição, e deixa de valer com ela.
+
+Para invalidar as provas e manter o acesso, use a rotação de chave (muda a generation, seção seguinte) ou o reset do fator do usuário (seção anterior).
 
 ## Rotação de chave e migração
 
